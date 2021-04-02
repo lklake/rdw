@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "rdw",
+    "rdw-vnc",
+]
+exclude = [
+    "cbindgen",
+]

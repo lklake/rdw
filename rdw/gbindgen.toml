@@ -1,0 +1,2 @@
+namespace = "Rdw"
+sys_includes = ["gtk/gtk.h"]
