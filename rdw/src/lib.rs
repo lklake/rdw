@@ -1,3 +1,5 @@
+mod egl;
+mod error;
 mod display;
 pub use display::*;
 

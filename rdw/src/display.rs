@@ -1,4 +1,7 @@
 use gtk::{gdk, glib};
+use gtk::prelude::*;
+
+use crate::{egl, error::Error};
 
 pub mod imp {
     use super::*;
@@ -40,19 +43,53 @@ pub mod imp {
         type ParentType = gtk::GLArea;
         type Class = RdwDisplayClass;
         type Instance = RdwDisplay;
+
+        fn class_init(_klass: &mut Self::Class) {
+            // Assume EGL for now, done at class init time but could be done lazily?
+            let egl = egl::egl();
+
+            gl::load_with(|s| {
+                egl.get_proc_address(s)
+                    .map(|f| f as _)
+                    .unwrap_or(std::ptr::null())
+            });
+        }
     }
 
     impl ObjectImpl for Display {}
 
-    impl WidgetImpl for Display {}
+    impl WidgetImpl for Display {
+        fn realize(&self, widget: &Self::Type) {
+            widget.set_has_depth_buffer(false);
+            widget.set_has_stencil_buffer(false);
+            widget.set_auto_render(false);
+            widget.set_required_version(3, 2);
+            self.parent_realize(widget);
+            widget.make_current();
+
+            if let Err(e) = unsafe { self.realize_gl() } {
+                let e = glib::Error::new(Error::GL, &e);
+                widget.set_error(Some(&e));
+            }
+        }
+    }
 
     impl GLAreaImpl for Display {
         fn render(&self, _gl_area: &Self::Type, _context: &gdk::GLContext) -> bool {
+            unsafe {
+                gl::ClearColor(0.1, 0.1, 0.1, 1.0);
+                gl::Clear(gl::COLOR_BUFFER_BIT);
+                gl::Disable(gl::BLEND);
+            }
             false
         }
     }
 
-    impl Display {}
+    impl Display {
+        unsafe fn realize_gl(&self) -> Result<(), String> {
+            Ok(())
+        }
+    }
 
     pub trait DisplayImpl: DisplayImplExt + GLAreaImpl {}
 
