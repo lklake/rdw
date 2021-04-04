@@ -1,6 +1,8 @@
+mod display;
 mod egl;
 mod error;
-mod display;
+mod util;
+
 pub use display::*;
 
 #[cfg(feature = "capi")]
