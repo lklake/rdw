@@ -9,12 +9,15 @@ fn build_ui(application: &gtk::Application) {
     window.set_default_size(1024, 768);
 
     let display = rdw_vnc::DisplayVnc::new();
+    display.connection().open_host("localhost", "5900");
     window.set_child(Some(&display));
 
     window.show();
 }
 
 fn main() {
+    env_logger::init();
+
     let application = gtk::Application::new(Some("org.gnome.rdw-vnc.basic"), Default::default())
         .expect("Initialization failed...");
 

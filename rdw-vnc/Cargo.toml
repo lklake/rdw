@@ -11,3 +11,6 @@ derivative = "2.2.0"
 gtk = { package = "gtk4", git = "https://github.com/gtk-rs/gtk4-rs" }
 gvnc = { git = "https://gitlab.gnome.org/malureau/gtk-vnc-rs.git" }
 rdw = { path = "../rdw" }
+
+[dev-dependencies]
+env_logger = { version = "0.7", default-features = false }
