@@ -1,4 +1,4 @@
-use glib::{subclass::prelude::*, translate::*};
+use glib::{subclass::prelude::*, translate::*, clone};
 use gtk::glib;
 
 mod imp {
@@ -36,12 +36,16 @@ mod imp {
     #[derive(Debug)]
     pub struct DisplayVnc {
         pub(crate) connection: gvnc::Connection,
+        pub(crate) keycode_map: Option<()>,
+        pub(crate) allow_lossy: bool,
     }
 
     impl Default for DisplayVnc {
         fn default() -> Self {
             Self {
                 connection: gvnc::Connection::new(),
+                keycode_map: None,
+                allow_lossy: true,
             }
         }
     }
@@ -60,27 +64,23 @@ mod imp {
             self.parent_constructed(obj);
 
             self.connection.connect_vnc_auth_choose_type(|conn, va| {
+                use gvnc::ConnectionAuth::*;
                 log::debug!("auth-choose-type: {:?}", va);
 
                 let prefer_auth = [
                     // Both these two provide TLS based auth, and can layer
                     // all the other auth types on top. So these two must
                     // be the first listed
-                    gvnc::ConnectionAuth::Vencrypt,
-                    gvnc::ConnectionAuth::Tls,
-                    // Then stackable auth types in order of preference
-                    gvnc::ConnectionAuth::Sasl,
-                    gvnc::ConnectionAuth::Mslogonii,
-                    gvnc::ConnectionAuth::Mslogon,
-                    gvnc::ConnectionAuth::Ard,
-                    gvnc::ConnectionAuth::Vnc,
-                    // Or nothing at all
-                    gvnc::ConnectionAuth::None,
+                    Vencrypt, Tls, // Then stackable auth types in order of preference
+                    Sasl, Mslogonii, Mslogon, Ard, Vnc, None, // Or nothing at all
                 ];
                 for auth in &prefer_auth {
                     for a in va.iter() {
                         if a.get::<gvnc::ConnectionAuth>().unwrap() == Some(*auth) {
-                            conn.set_auth_type(auth.to_glib().try_into().unwrap());
+                            if let Err(e) = conn.set_auth_type(auth.to_glib().try_into().unwrap()) {
+                                log::warn!("Failed to set auth type: {}", e);
+                                conn.shutdown();
+                            }
                             return;
                         }
                     }
@@ -89,9 +89,13 @@ mod imp {
                 log::debug!("No preferred auth type found");
                 conn.shutdown();
             });
-            self.connection.connect_vnc_initialized(|_| {
-                log::debug!("initialized");
-            });
+            self.connection.connect_vnc_initialized(clone!(@weak obj => move |conn| {
+                let self_ = imp::DisplayVnc::from_instance(&obj);
+                if let Err(e) = self_.on_initialized() {
+                    log::warn!("Failed to initialize: {}", e);
+                    conn.shutdown();
+                }
+            }));
             self.connection.connect_vnc_cursor_changed(|_, cursor| {
                 log::debug!("cursor-changed: {:?}", &cursor);
             });
@@ -125,7 +129,84 @@ mod imp {
 
     impl GLAreaImpl for DisplayVnc {}
 
-    impl DisplayVnc {}
+    impl DisplayVnc {
+        fn do_framebuffer_init(&self) {
+
+        }
+
+        fn on_initialized(&self) -> Result<(), glib::BoolError> {
+            use gvnc::ConnectionEncoding::*;
+            log::debug!("on_initialized");
+
+            let mut enc = vec![
+                TightJpeg5,
+                Tight,
+                Xvp,
+                ExtKeyEvent,
+                LedState,
+                ExtendedDesktopResize,
+                DesktopResize,
+                DesktopName,
+                LastRect,
+                Wmvi,
+                Audio,
+                AlphaCursor,
+                RichCursor,
+                Xcursor,
+                PointerChange,
+                Zrle,
+                Hextile,
+                Rre,
+                CopyRect,
+                Raw,
+            ];
+
+            let mut format = self.connection.get_pixel_format().unwrap();
+            log::debug!("format: {:?}", format);
+            format.set_byte_order(gvnc::ByteOrder::Little);
+            self.connection.set_pixel_format(&format)?;
+
+            self.do_framebuffer_init();
+
+            fn pixbuf_supports(fmt: &str) -> bool {
+                for f in gtk::gdk_pixbuf::Pixbuf::get_formats() {
+                    if let Some(name) = f.get_name() {
+                        if name.as_str() == fmt {
+                            return true;
+                        }
+                    }
+                }
+                false
+            }
+            if pixbuf_supports("jpeg") {
+                if !self.allow_lossy {
+                    enc.retain(|x| *x != TightJpeg5);
+                }
+            } else {
+                enc.retain(|x| *x != TightJpeg5);
+                enc.retain(|x| *x != Tight);
+            }
+
+            if self.keycode_map.is_none() {
+                enc.retain(|x| *x != ExtKeyEvent);
+            }
+
+            let enc: Vec<i32> = enc
+                .into_iter()
+                .map(|x| x.to_glib().try_into().unwrap())
+                .collect();
+            self.connection.set_encodings(&enc)?;
+
+            self.connection.framebuffer_update_request(
+                false,
+                0,
+                0,
+                self.connection.get_width().try_into().unwrap(),
+                self.connection.get_height().try_into().unwrap(),
+            )?;
+            Ok(())
+        }
+    }
 }
 
 glib::wrapper! {
