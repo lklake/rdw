@@ -2,6 +2,7 @@ use glib::{clone, subclass::prelude::*, translate::*};
 use gtk::{glib, prelude::*};
 use gvnc::FramebufferExt;
 
+use keycodemap::KEYMAP_XORGEVDEV2QNUM;
 use rdw::DisplayExt;
 
 mod imp {
@@ -41,7 +42,7 @@ mod imp {
     pub struct DisplayVnc {
         pub(crate) connection: gvnc::Connection,
         pub(crate) fb: RefCell<Option<Framebuffer>>,
-        pub(crate) keycode_map: Option<()>,
+        pub(crate) keycode_map: bool,
         pub(crate) allow_lossy: bool,
     }
 
@@ -50,7 +51,7 @@ mod imp {
             Self {
                 connection: gvnc::Connection::new(),
                 fb: RefCell::new(None),
-                keycode_map: None,
+                keycode_map: true,
                 allow_lossy: true,
             }
         }
@@ -69,12 +70,17 @@ mod imp {
         fn constructed(&self, obj: &Self::Type) {
             self.parent_constructed(obj);
 
-            obj.connect_key_press(|_, keycode| {
-                log::debug!("key-press: {}", keycode);
-            });
-            obj.connect_key_release(|_, keycode| {
-                log::debug!("key-release: {}", keycode);
-            });
+            obj.connect_key_press(clone!(@weak obj => move |_, keyval, keycode| {
+                let self_ = Self::from_instance(&obj);
+                log::debug!("key-press: {:?}", (keyval, keycode));
+                self_.key_event(true, keyval, keycode);
+            }));
+
+            obj.connect_key_release(clone!(@weak obj => move |_, keyval, keycode| {
+                let self_ = Self::from_instance(&obj);
+                log::debug!("key-release: {:?}", (keyval, keycode));
+                self_.key_event(false, keyval, keycode);
+            }));
 
             self.connection.connect_vnc_auth_choose_type(|conn, va| {
                 use gvnc::ConnectionAuth::*;
@@ -99,13 +105,13 @@ mod imp {
                     }
                 }
 
-                log::debug!("No preferred auth type found");
+                log::warn!("No preferred auth type found");
                 conn.shutdown();
             });
 
             self.connection
                 .connect_vnc_initialized(clone!(@weak obj => move |conn| {
-                    let self_ = imp::DisplayVnc::from_instance(&obj);
+                    let self_ = Self::from_instance(&obj);
                     if let Err(e) = self_.on_initialized() {
                         log::warn!("Failed to initialize: {}", e);
                         conn.shutdown();
@@ -132,7 +138,7 @@ mod imp {
 
             self.connection.connect_vnc_framebuffer_update(
                 clone!(@weak obj => move |_, x, y, w, h| {
-                    let self_ = imp::DisplayVnc::from_instance(&obj);
+                    let self_ = Self::from_instance(&obj);
                     log::debug!("framebuffer-update: {:?}", (x, y, w, h));
                     if let Some(fb) = &*self_.fb.borrow() {
                         let sub = fb.get_sub(
@@ -150,7 +156,7 @@ mod imp {
 
             self.connection
                 .connect_vnc_desktop_resize(clone!(@weak obj => move |_, w, h| {
-                    let self_ = imp::DisplayVnc::from_instance(&obj);
+                    let self_ = Self::from_instance(&obj);
                     log::debug!("desktop-resize: {:?}", (w, h));
                     self_.do_framebuffer_init();
                     obj.set_display_size(Some((w.try_into().unwrap(), h.try_into().unwrap())));
@@ -165,7 +171,7 @@ mod imp {
 
             self.connection.connect_vnc_pixel_format_changed(
                 clone!(@weak obj => move |_, format| {
-                    let self_ = imp::DisplayVnc::from_instance(&obj);
+                    let self_ = Self::from_instance(&obj);
                     log::debug!("pixel-format-changed: {:?}", format);
                     self_.do_framebuffer_init();
                     if let Err(e) = self_.framebuffer_update_request(false) {
@@ -187,6 +193,15 @@ mod imp {
     impl rdw::DisplayImpl for DisplayVnc {}
 
     impl DisplayVnc {
+        fn key_event(&self, press: bool, keyval: u32, keycode: u32) {
+            // TODO: get the correct keymap according to gdk display type
+            if let Some(qnum) = KEYMAP_XORGEVDEV2QNUM.get(keycode as usize) {
+                if let Err(e) = self.connection.key_event(press, keyval, *qnum) {
+                    log::warn!("Failed to send key event: {}", e);
+                }
+            }
+        }
+
         fn do_framebuffer_init(&self) {
             let remote_format = self.connection.get_pixel_format().unwrap();
             let (width, height) = (self.connection.get_width(), self.connection.get_height());
@@ -260,7 +275,7 @@ mod imp {
                 enc.retain(|x| *x != Tight);
             }
 
-            if self.keycode_map.is_none() {
+            if self.keycode_map {
                 enc.retain(|x| *x != ExtKeyEvent);
             }
 

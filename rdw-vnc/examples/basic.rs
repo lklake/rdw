@@ -17,6 +17,7 @@ fn build_ui(application: &gtk::Application) {
 
 fn main() {
     env_logger::init();
+    gvnc::set_debug(true);
 
     let application = gtk::Application::new(Some("org.gnome.rdw-vnc.basic"), Default::default())
         .expect("Initialization failed...");

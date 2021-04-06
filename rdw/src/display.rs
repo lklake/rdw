@@ -78,13 +78,13 @@ pub mod imp {
                 vec![
                     Signal::builder(
                         "key-press",
-                        &[u32::static_type().into()],
+                        &[u32::static_type().into(), u32::static_type().into()],
                         <()>::static_type().into(),
                     )
                     .build(),
                     Signal::builder(
                         "key-release",
-                        &[u32::static_type().into()],
+                        &[u32::static_type().into(), u32::static_type().into()],
                         <()>::static_type().into(),
                     )
                     .build(),
@@ -116,13 +116,13 @@ pub mod imp {
             ec.set_propagation_phase(gtk::PropagationPhase::Capture);
             widget.add_controller(&ec);
             ec.connect_key_pressed(
-                clone!(@weak widget => @default-panic, move |_, _keyval, keycode, _state| {
-                    widget.emit_by_name("key-press", &[&keycode]).unwrap();
+                clone!(@weak widget => @default-panic, move |_, keyval, keycode, _state| {
+                    widget.emit_by_name("key-press", &[&*keyval, &keycode]).unwrap();
                     glib::signal::Inhibit(true)
                 }),
             );
-            ec.connect_key_released(clone!(@weak widget => move |_, _keyval, keycode, _state| {
-                widget.emit_by_name("key-release", &[&keycode]).unwrap();
+            ec.connect_key_released(clone!(@weak widget => move |_, keyval, keycode, _state| {
+                widget.emit_by_name("key-release", &[&*keyval, &keycode]).unwrap();
             }));
             self.key_controller.set(ec).unwrap();
         }
@@ -289,9 +289,9 @@ pub trait DisplayExt: 'static {
 
     fn update_area(&self, x: i32, y: i32, w: i32, h: i32, stride: i32, data: &[u8]);
 
-    fn connect_key_press<F: Fn(&Self, u32) + 'static>(&self, f: F) -> SignalHandlerId;
+    fn connect_key_press<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId;
 
-    fn connect_key_release<F: Fn(&Self, u32) + 'static>(&self, f: F) -> SignalHandlerId;
+    fn connect_key_release<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId;
 }
 
 impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
@@ -345,9 +345,10 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
         self.queue_render();
     }
 
-    fn connect_key_press<F: Fn(&Self, u32) + 'static>(&self, f: F) -> SignalHandlerId {
-        unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, u32) + 'static>(
+    fn connect_key_press<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId {
+        unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, u32, u32) + 'static>(
             this: *mut imp::RdwDisplay,
+            keyval: u32,
             keycode: u32,
             f: glib::ffi::gpointer,
         ) where
@@ -356,6 +357,7 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
             let f = &*(f as *const F);
             f(
                 &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
+                keyval,
                 keycode,
             )
         }
@@ -370,9 +372,10 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
         }
     }
 
-    fn connect_key_release<F: Fn(&Self, u32) + 'static>(&self, f: F) -> SignalHandlerId {
-        unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, u32) + 'static>(
+    fn connect_key_release<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId {
+        unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, u32, u32) + 'static>(
             this: *mut imp::RdwDisplay,
+            keyval: u32,
             keycode: u32,
             f: glib::ffi::gpointer,
         ) where
@@ -381,6 +384,7 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
             let f = &*(f as *const F);
             f(
                 &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
+                keyval,
                 keycode,
             )
         }
