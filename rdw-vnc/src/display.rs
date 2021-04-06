@@ -82,6 +82,14 @@ mod imp {
                 self_.key_event(false, keyval, keycode);
             }));
 
+            obj.connect_motion(clone!(@weak obj => move |_, x, y| {
+                let self_ = Self::from_instance(&obj);
+                log::debug!("motion: {:?}", (x, y));
+                if let Err(e) = self_.connection.pointer_event(0, x as _, y as _) {
+                    log::warn!("Failed to send pointer event: {}", e);
+                }
+            }));
+
             self.connection.connect_vnc_auth_choose_type(|conn, va| {
                 use gvnc::ConnectionAuth::*;
                 log::debug!("auth-choose-type: {:?}", va);

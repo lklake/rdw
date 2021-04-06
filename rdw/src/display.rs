@@ -88,6 +88,12 @@ pub mod imp {
                         <()>::static_type().into(),
                     )
                     .build(),
+                    Signal::builder(
+                        "motion",
+                        &[f64::static_type().into(), f64::static_type().into()],
+                        <()>::static_type().into(),
+                    )
+                    .build(),
                 ]
             });
             SIGNALS.as_ref()
@@ -125,17 +131,26 @@ pub mod imp {
                 widget.emit_by_name("key-release", &[&*keyval, &keycode]).unwrap();
             }));
             self.key_controller.set(ec).unwrap();
+
+            let ec = gtk::EventControllerMotion::new();
+            widget.add_controller(&ec);
+            ec.connect_motion(clone!(@weak widget => move |_, x, y| {
+                let self_ = Self::from_instance(&widget);
+                if let Some((x, y)) = self_.transform_input(x, y) {
+                    widget.emit_by_name("motion", &[&x, &y]).unwrap();
+                }
+            }));
         }
     }
 
     impl GLAreaImpl for Display {
-        fn render(&self, gl_area: &Self::Type, _context: &gdk::GLContext) -> bool {
+        fn render(&self, _gl_area: &Self::Type, _context: &gdk::GLContext) -> bool {
             unsafe {
                 gl::ClearColor(0.1, 0.1, 0.1, 1.0);
                 gl::Clear(gl::COLOR_BUFFER_BIT);
                 gl::Disable(gl::BLEND);
 
-                if let Some(vp) = self.viewport(gl_area) {
+                if let Some(vp) = self.viewport() {
                     gl::Viewport(vp.x, vp.y, vp.width, vp.height);
                     self.texture_blit(false);
                 }
@@ -213,13 +228,14 @@ pub mod imp {
             gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
         }
 
-        fn borders(&self, gl_area: &super::Display) -> (u32, u32) {
-            let (dw, dh) = match gl_area.display_size() {
+        fn borders(&self) -> (u32, u32) {
+            let display = self.get_instance();
+            let (dw, dh) = match display.display_size() {
                 Some(size) => size,
                 None => return (0, 0),
             };
-            let sf = gl_area.get_scale_factor();
-            let (w, h) = (gl_area.get_width() * sf, gl_area.get_height() * sf);
+            let sf = display.get_scale_factor();
+            let (w, h) = (display.get_width() * sf, display.get_height() * sf);
             let (sw, sh) = (w as f32 / dw as f32, h as f32 / dh as f32);
 
             if sw < sh {
@@ -231,18 +247,34 @@ pub mod imp {
             }
         }
 
-        fn viewport(&self, gl_area: &super::Display) -> Option<gdk::Rectangle> {
-            gl_area.display_size()?;
+        fn viewport(&self) -> Option<gdk::Rectangle> {
+            let display = self.get_instance();
+            display.display_size()?;
 
-            let sf = gl_area.get_scale_factor();
-            let (w, h) = (gl_area.get_width() * sf, gl_area.get_height() * sf);
-            let (borderw, borderh) = self.borders(gl_area);
+            let sf = display.get_scale_factor();
+            let (w, h) = (display.get_width() * sf, display.get_height() * sf);
+            let (borderw, borderh) = self.borders();
             let (borderw, borderh) = (borderw as i32, borderh as i32);
             Some(gdk::Rectangle {
                 x: borderw,
                 y: borderh,
                 width: w - borderw * 2,
                 height: h - borderh * 2,
+            })
+        }
+
+        fn transform_input(&self, x: f64, y: f64) -> Option<(f64, f64)> {
+            let display = self.get_instance();
+            let sf = display.get_scale_factor() as f64;
+            self.viewport().and_then(|vp| {
+                let (x, y) = (x * sf, y * sf);
+                if !vp.contains_point(x as _, y as _) {
+                    return None;
+                }
+                let (sw, sh) = display.display_size().unwrap();
+                let x = (x - vp.x as f64) * (sw as f64 / vp.width as f64);
+                let y = (y - vp.y as f64) * (sh as f64 / vp.height as f64);
+                Some((x, y))
             })
         }
     }
@@ -292,6 +324,8 @@ pub trait DisplayExt: 'static {
     fn connect_key_press<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId;
 
     fn connect_key_release<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId;
+
+    fn connect_motion<F: Fn(&Self, f64, f64) + 'static>(&self, f: F) -> SignalHandlerId;
 }
 
 impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
@@ -411,6 +445,33 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
             glib::signal::connect_raw(
                 self.as_ptr() as *mut glib::gobject_ffi::GObject,
                 b"key-release\0".as_ptr() as *const _,
+                Some(std::mem::transmute(connect_trampoline::<Self, F> as usize)),
+                Box::into_raw(f),
+            )
+        }
+    }
+
+    fn connect_motion<F: Fn(&Self, f64, f64) + 'static>(&self, f: F) -> SignalHandlerId {
+        unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, f64, f64) + 'static>(
+            this: *mut imp::RdwDisplay,
+            x: f64,
+            y: f64,
+            f: glib::ffi::gpointer,
+        ) where
+            P: IsA<Display>,
+        {
+            let f = &*(f as *const F);
+            f(
+                &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
+                x,
+                y,
+            )
+        }
+        unsafe {
+            let f: Box<F> = Box::new(f);
+            glib::signal::connect_raw(
+                self.as_ptr() as *mut glib::gobject_ffi::GObject,
+                b"motion\0".as_ptr() as *const _,
                 Some(std::mem::transmute(connect_trampoline::<Self, F> as usize)),
                 Box::into_raw(f),
             )
