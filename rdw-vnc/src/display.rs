@@ -183,15 +183,11 @@ mod imp {
             self.do_framebuffer_init();
 
             fn pixbuf_supports(fmt: &str) -> bool {
-                for f in gtk::gdk_pixbuf::Pixbuf::get_formats() {
-                    if let Some(name) = f.get_name() {
-                        if name.as_str() == fmt {
-                            return true;
-                        }
-                    }
-                }
-                false
+                gtk::gdk_pixbuf::Pixbuf::get_formats()
+                    .iter()
+                    .any(|f| f.get_name().map_or(false, |name| name.as_str() == fmt))
             }
+
             if pixbuf_supports("jpeg") {
                 if !self.allow_lossy {
                     enc.retain(|x| *x != TightJpeg5);
