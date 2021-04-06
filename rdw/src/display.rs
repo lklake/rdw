@@ -1,6 +1,6 @@
 use gl::types::*;
 use glib::subclass::prelude::*;
-use gtk::{gdk, glib, prelude::*};
+use gtk::{gdk, glib, prelude::*, subclass::prelude::GLAreaImpl};
 use std::cell::Cell;
 
 use crate::{egl, error::Error, util};
@@ -202,26 +202,37 @@ pub mod imp {
         }
     }
 
-    pub trait DisplayImpl: DisplayImplExt + GLAreaImpl {}
 
-    pub trait DisplayImplExt: ObjectSubclass {}
+}
 
-    unsafe impl<T: GLAreaImpl> IsSubclassable<T> for super::Display {
-        fn class_init(class: &mut glib::Class<Self>) {
-            <gtk::Widget as IsSubclassable<T>>::class_init(class);
-        }
+pub const NONE_DISPLAY: Option<&Display> = None;
 
-        fn instance_init(instance: &mut glib::subclass::InitializingObject<T>) {
-            <gtk::Widget as IsSubclassable<T>>::instance_init(instance);
-        }
+pub trait DisplayExt: 'static {
+    fn display_size(&self) -> Option<(u32, u32)>;
+}
+
+impl<O: IsA<Display>> DisplayExt for O {
+    fn display_size(&self) -> Option<(u32, u32)> {
+        // Safety: safe because IsA<Display>
+        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
+
+        self_.display_size.get()
     }
 }
 
-impl Display {
-    pub fn display_size(&self) -> Option<(u32, u32)> {
-        let self_ = imp::Display::from_instance(self);
+pub trait DisplayImpl: DisplayImplExt + GLAreaImpl {}
 
-        self_.display_size.get()
+pub trait DisplayImplExt: ObjectSubclass {}
+
+impl<T: DisplayImpl> DisplayImplExt for T {}
+
+unsafe impl<T: DisplayImpl> IsSubclassable<T> for Display {
+    fn class_init(class: &mut glib::Class<Self>) {
+        <gtk::Widget as IsSubclassable<T>>::class_init(class);
+    }
+
+    fn instance_init(instance: &mut glib::subclass::InitializingObject<T>) {
+        <gtk::Widget as IsSubclassable<T>>::instance_init(instance);
     }
 }
 

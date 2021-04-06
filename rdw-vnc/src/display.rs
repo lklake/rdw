@@ -133,6 +133,8 @@ mod imp {
 
     impl GLAreaImpl for DisplayVnc {}
 
+    impl rdw::DisplayImpl for DisplayVnc {}
+
     impl DisplayVnc {
         fn do_framebuffer_init(&self) {
             let remote_format = self.connection.get_pixel_format().unwrap();
