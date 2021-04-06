@@ -1,5 +1,7 @@
 use glib::{clone, subclass::prelude::*, translate::*};
-use gtk::glib;
+use gtk::{glib, prelude::*};
+
+use rdw::DisplayExt;
 
 mod imp {
     use std::{cell::RefCell, convert::TryInto};
@@ -100,9 +102,15 @@ mod imp {
                         conn.shutdown();
                     }
                 }));
-            self.connection.connect_vnc_cursor_changed(|_, cursor| {
+            self.connection.connect_vnc_cursor_changed(clone!(@weak obj => move |_, cursor| {
                 log::debug!("cursor-changed: {:?}", &cursor);
-            });
+                obj.define_cursor(
+                    cursor.map(|c|{
+                        let (w, h, hot_x, hot_y, data) = (c.get_width(), c.get_height(), c.get_hotx(), c.get_hoty(), c.get_data());
+                        rdw::Display::make_cursor(data, w.into(), h.into(), hot_x.into(), hot_y.into(), obj.get_scale_factor())
+                    })
+                );
+            }));
             self.connection.connect_vnc_pointer_mode_changed(|_, abs| {
                 log::debug!("pointer-mode-changed: {}", abs);
             });
@@ -219,7 +227,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct DisplayVnc(ObjectSubclass<imp::DisplayVnc>) @extends rdw::Display, gtk::Widget;
+    pub struct DisplayVnc(ObjectSubclass<imp::DisplayVnc>) @extends rdw::Display, gtk::GLArea, gtk::Widget;
 }
 
 impl DisplayVnc {

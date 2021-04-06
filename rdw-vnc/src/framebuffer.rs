@@ -1,6 +1,6 @@
 use glib::translate::ToGlibPtrMut;
-use gtk::{glib, subclass::prelude::ObjectSubclassExt};
 use gtk::prelude::*;
+use gtk::{glib, subclass::prelude::ObjectSubclassExt};
 
 use gvnc::subclass::base_framebuffer::*;
 
