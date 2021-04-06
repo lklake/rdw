@@ -2,3 +2,6 @@
 	path = cbindgen
 	url = https://github.com/elmarco/cbindgen.git
 	branch = gbindgen
+[submodule "keycodemapdb"]
+	path = keycodemapdb
+	url = http://gitlab.com/keycodemap/keycodemapdb.git
