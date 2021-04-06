@@ -155,7 +155,7 @@ pub mod imp {
             Ok(())
         }
 
-        fn texture_id(&self) -> GLuint {
+        pub(crate) fn texture_id(&self) -> GLuint {
             self.texture_id.get()
         }
 
@@ -242,7 +242,11 @@ pub const NONE_DISPLAY: Option<&Display> = None;
 pub trait DisplayExt: 'static {
     fn display_size(&self) -> Option<(u32, u32)>;
 
+    fn set_display_size(&self, size: Option<(u32, u32)>);
+
     fn define_cursor(&self, cursor: Option<gdk::Cursor>);
+
+    fn update_area(&self, x: i32, y: i32, w: i32, h: i32, stride: i32, data: &[u8]);
 }
 
 impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
@@ -253,6 +257,13 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
         self_.display_size.get()
     }
 
+    fn set_display_size(&self, size: Option<(u32, u32)>) {
+        // Safety: safe because IsA<Display>
+        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
+
+        self_.display_size.replace(size);
+    }
+
     fn define_cursor(&self, cursor: Option<gdk::Cursor>) {
         // Safety: safe because IsA<Display>
         let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
@@ -260,6 +271,33 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
         // TODO: for now client side only
         self.set_cursor(cursor.as_ref());
         self_.cursor.replace(cursor);
+    }
+
+    fn update_area(&self, x: i32, y: i32, w: i32, h: i32, stride: i32, data: &[u8]) {
+        // Safety: safe because IsA<Display>
+        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
+        self.make_current();
+
+        // TODO: check data boundaries
+        unsafe {
+            gl::BindTexture(gl::TEXTURE_2D, self_.texture_id());
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as _);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as _);
+            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, stride / 4);
+            gl::TexSubImage2D(
+                gl::TEXTURE_2D,
+                0,
+                x,
+                y,
+                w,
+                h,
+                gl::BGRA,
+                gl::UNSIGNED_BYTE,
+                data.as_ptr() as _,
+            );
+        }
+
+        self.queue_render();
     }
 }
 
