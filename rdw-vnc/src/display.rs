@@ -203,10 +203,7 @@ mod imp {
                 enc.retain(|x| *x != ExtKeyEvent);
             }
 
-            let enc: Vec<i32> = enc
-                .into_iter()
-                .map(|x| x.to_glib().try_into().unwrap())
-                .collect();
+            let enc: Vec<i32> = enc.into_iter().map(|x| x.to_glib()).collect();
             self.connection.set_encodings(&enc)?;
 
             self.connection.framebuffer_update_request(

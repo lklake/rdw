@@ -52,14 +52,20 @@ impl Framebuffer {
                 buffer.as_ptr() as _,
             );
         };
-        let fb = glib::Object::with_values(Self::static_type(), &[
-            ("buffer", value),
-            ("width", width.to_value()),
-            ("height", height.to_value()),
-            ("rowstride", (width * 4).to_value()),
-            ("local-format", local_format.to_value()),
-            ("remote-format", remote_format.to_value()),
-        ]).unwrap().downcast().unwrap();
+        let fb = glib::Object::with_values(
+            Self::static_type(),
+            &[
+                ("buffer", value),
+                ("width", width.to_value()),
+                ("height", height.to_value()),
+                ("rowstride", (width * 4).to_value()),
+                ("local-format", local_format.to_value()),
+                ("remote-format", remote_format.to_value()),
+            ],
+        )
+        .unwrap()
+        .downcast()
+        .unwrap();
         let self_ = imp::Framebuffer::from_instance(&fb);
         self_.buffer.set(buffer).unwrap();
         fb
