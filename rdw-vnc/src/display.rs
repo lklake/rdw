@@ -69,6 +69,13 @@ mod imp {
         fn constructed(&self, obj: &Self::Type) {
             self.parent_constructed(obj);
 
+            obj.connect_key_press(|_, keycode| {
+                log::debug!("key-press: {}", keycode);
+            });
+            obj.connect_key_release(|_, keycode| {
+                log::debug!("key-release: {}", keycode);
+            });
+
             self.connection.connect_vnc_auth_choose_type(|conn, va| {
                 use gvnc::ConnectionAuth::*;
                 log::debug!("auth-choose-type: {:?}", va);
