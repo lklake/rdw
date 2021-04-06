@@ -6,6 +6,8 @@ use std::cell::Cell;
 use crate::{egl, error::Error, util};
 
 pub mod imp {
+    use std::cell::RefCell;
+
     use super::*;
     use gtk::subclass::prelude::*;
 
@@ -39,6 +41,8 @@ pub mod imp {
     pub struct Display {
         // The remote display size, ex: 1024x768
         pub display_size: Cell<Option<(u32, u32)>>,
+        // The currently defined cursor
+        pub cursor: RefCell<Option<gdk::Cursor>>,
         pub texture_id: Cell<GLuint>,
         pub texture_blit_vao: Cell<GLuint>,
         pub texture_blit_prog: Cell<GLuint>,
@@ -201,22 +205,61 @@ pub mod imp {
             })
         }
     }
+}
 
-
+impl Display {
+    pub fn make_cursor(
+        data: &[u8],
+        width: i32,
+        height: i32,
+        hot_x: i32,
+        hot_y: i32,
+        scale: i32,
+    ) -> gdk::Cursor {
+        let pb = gdk::gdk_pixbuf::Pixbuf::from_mut_slice(
+            data.to_vec(),
+            gdk::gdk_pixbuf::Colorspace::Rgb,
+            true,
+            8,
+            width,
+            height,
+            width * 4,
+        );
+        let pb = pb
+            .scale_simple(
+                width * scale,
+                height * scale,
+                gdk::gdk_pixbuf::InterpType::Bilinear,
+            )
+            .unwrap();
+        let tex = gdk::Texture::new_for_pixbuf(&pb);
+        gdk::Cursor::from_texture(&tex, hot_x * scale, hot_y * scale, None)
+    }
 }
 
 pub const NONE_DISPLAY: Option<&Display> = None;
 
 pub trait DisplayExt: 'static {
     fn display_size(&self) -> Option<(u32, u32)>;
+
+    fn define_cursor(&self, cursor: Option<gdk::Cursor>);
 }
 
-impl<O: IsA<Display>> DisplayExt for O {
+impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
     fn display_size(&self) -> Option<(u32, u32)> {
         // Safety: safe because IsA<Display>
         let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
 
         self_.display_size.get()
+    }
+
+    fn define_cursor(&self, cursor: Option<gdk::Cursor>) {
+        // Safety: safe because IsA<Display>
+        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
+
+        // TODO: for now client side only
+        self.set_cursor(cursor.as_ref());
+        self_.cursor.replace(cursor);
     }
 }
 
