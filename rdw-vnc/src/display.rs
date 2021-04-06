@@ -144,6 +144,7 @@ mod imp {
                         let sub = fb.get_sub(
                             x.try_into().unwrap(),
                             y.try_into().unwrap(),
+                            w.try_into().unwrap(),
                             h.try_into().unwrap()
                         );
                         obj.update_area(x, y, w, h, (fb.get_width() * 4).into(), sub);

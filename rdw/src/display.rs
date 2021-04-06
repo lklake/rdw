@@ -305,6 +305,24 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
     fn set_display_size(&self, size: Option<(u32, u32)>) {
         // Safety: safe because IsA<Display>
         let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
+        self.make_current();
+
+        if let Some((width, height)) = size {
+            unsafe {
+                gl::BindTexture(gl::TEXTURE_2D, self_.texture_id());
+                gl::TexImage2D(
+                    gl::TEXTURE_2D,
+                    0,
+                    gl::RGB as _,
+                    width as _,
+                    height as _,
+                    0,
+                    gl::BGRA,
+                    gl::UNSIGNED_BYTE,
+                    std::ptr::null(),
+                );
+            }
+        }
 
         self_.display_size.replace(size);
     }
