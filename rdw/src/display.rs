@@ -1,5 +1,5 @@
 use gl::types::*;
-use glib::subclass::prelude::*;
+use glib::{clone, signal::SignalHandlerId, subclass::prelude::*, translate::FromGlibPtrBorrow};
 use gtk::{gdk, glib, prelude::*, subclass::prelude::GLAreaImpl};
 use std::cell::Cell;
 
@@ -9,7 +9,9 @@ pub mod imp {
     use std::cell::RefCell;
 
     use super::*;
+    use glib::subclass::Signal;
     use gtk::subclass::prelude::*;
+    use once_cell::sync::{Lazy, OnceCell};
 
     #[repr(C)]
     pub struct RdwDisplayClass {
@@ -39,6 +41,7 @@ pub mod imp {
 
     #[derive(Default)]
     pub struct Display {
+        pub key_controller: OnceCell<gtk::EventControllerKey>,
         // The remote display size, ex: 1024x768
         pub display_size: Cell<Option<(u32, u32)>>,
         // The currently defined cursor
@@ -69,7 +72,27 @@ pub mod imp {
         }
     }
 
-    impl ObjectImpl for Display {}
+    impl ObjectImpl for Display {
+        fn signals() -> &'static [Signal] {
+            static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
+                vec![
+                    Signal::builder(
+                        "key-press",
+                        &[u32::static_type().into()],
+                        <()>::static_type().into(),
+                    )
+                    .build(),
+                    Signal::builder(
+                        "key-release",
+                        &[u32::static_type().into()],
+                        <()>::static_type().into(),
+                    )
+                    .build(),
+                ]
+            });
+            SIGNALS.as_ref()
+        }
+    }
 
     impl WidgetImpl for Display {
         fn realize(&self, widget: &Self::Type) {
@@ -84,6 +107,24 @@ pub mod imp {
                 let e = glib::Error::new(Error::GL, &e);
                 widget.set_error(Some(&e));
             }
+
+            widget.set_sensitive(true);
+            widget.set_focusable(true);
+            widget.set_focus_on_click(true);
+
+            let ec = gtk::EventControllerKey::new();
+            ec.set_propagation_phase(gtk::PropagationPhase::Capture);
+            widget.add_controller(&ec);
+            ec.connect_key_pressed(
+                clone!(@weak widget => @default-panic, move |_, _keyval, keycode, _state| {
+                    widget.emit_by_name("key-press", &[&keycode]).unwrap();
+                    glib::signal::Inhibit(true)
+                }),
+            );
+            ec.connect_key_released(clone!(@weak widget => move |_, _keyval, keycode, _state| {
+                widget.emit_by_name("key-release", &[&keycode]).unwrap();
+            }));
+            self.key_controller.set(ec).unwrap();
         }
     }
 
@@ -247,6 +288,10 @@ pub trait DisplayExt: 'static {
     fn define_cursor(&self, cursor: Option<gdk::Cursor>);
 
     fn update_area(&self, x: i32, y: i32, w: i32, h: i32, stride: i32, data: &[u8]);
+
+    fn connect_key_press<F: Fn(&Self, u32) + 'static>(&self, f: F) -> SignalHandlerId;
+
+    fn connect_key_release<F: Fn(&Self, u32) + 'static>(&self, f: F) -> SignalHandlerId;
 }
 
 impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
@@ -298,6 +343,56 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
         }
 
         self.queue_render();
+    }
+
+    fn connect_key_press<F: Fn(&Self, u32) + 'static>(&self, f: F) -> SignalHandlerId {
+        unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, u32) + 'static>(
+            this: *mut imp::RdwDisplay,
+            keycode: u32,
+            f: glib::ffi::gpointer,
+        ) where
+            P: IsA<Display>,
+        {
+            let f = &*(f as *const F);
+            f(
+                &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
+                keycode,
+            )
+        }
+        unsafe {
+            let f: Box<F> = Box::new(f);
+            glib::signal::connect_raw(
+                self.as_ptr() as *mut glib::gobject_ffi::GObject,
+                b"key-press\0".as_ptr() as *const _,
+                Some(std::mem::transmute(connect_trampoline::<Self, F> as usize)),
+                Box::into_raw(f),
+            )
+        }
+    }
+
+    fn connect_key_release<F: Fn(&Self, u32) + 'static>(&self, f: F) -> SignalHandlerId {
+        unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, u32) + 'static>(
+            this: *mut imp::RdwDisplay,
+            keycode: u32,
+            f: glib::ffi::gpointer,
+        ) where
+            P: IsA<Display>,
+        {
+            let f = &*(f as *const F);
+            f(
+                &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
+                keycode,
+            )
+        }
+        unsafe {
+            let f: Box<F> = Box::new(f);
+            glib::signal::connect_raw(
+                self.as_ptr() as *mut glib::gobject_ffi::GObject,
+                b"key-release\0".as_ptr() as *const _,
+                Some(std::mem::transmute(connect_trampoline::<Self, F> as usize)),
+                Box::into_raw(f),
+            )
+        }
     }
 }
 
