@@ -121,16 +121,27 @@ mod imp {
                 .connect_vnc_framebuffer_update(|_, x, y, w, h| {
                     log::debug!("framebuffer-update: {:?}", (x, y, w, h));
                 });
-            self.connection.connect_vnc_desktop_resize(|_, w, h| {
-                log::debug!("desktop-resize: {:?}", (w, h));
-            });
+            self.connection
+                .connect_vnc_desktop_resize(clone!(@weak obj => move |_, w, h| {
+                    let self_ = imp::DisplayVnc::from_instance(&obj);
+                    log::debug!("desktop-resize: {:?}", (w, h));
+                    self_.do_framebuffer_init();
+                    if let Err(e) = self_.framebuffer_update_request() {
+                        log::warn!("Failed to update framebuffer: {}", e);
+                    }
+                }));
             self.connection.connect_vnc_desktop_rename(|_, name| {
                 log::debug!("desktop-rename: {}", name);
             });
             self.connection
-                .connect_vnc_pixel_format_changed(|_, format| {
+                .connect_vnc_pixel_format_changed(clone!(@weak obj => move |_, format| {
+                    let self_ = imp::DisplayVnc::from_instance(&obj);
                     log::debug!("pixel-format-changed: {:?}", format);
-                });
+                    self_.do_framebuffer_init();
+                    if let Err(e) = self_.framebuffer_update_request() {
+                        log::warn!("Failed to update framebuffer: {}", e);
+                    }
+                }));
             self.connection.connect_vnc_auth_credential(|_, va| {
                 log::debug!("auth-credential: {:?}", va);
             });
@@ -154,6 +165,16 @@ mod imp {
             );
             self.connection.set_framebuffer(&fb).unwrap();
             self.fb.replace(Some(fb));
+        }
+
+        fn framebuffer_update_request(&self) -> Result<(), glib::BoolError> {
+            self.connection.framebuffer_update_request(
+                false,
+                0,
+                0,
+                self.connection.get_width().try_into().unwrap(),
+                self.connection.get_height().try_into().unwrap(),
+            )
         }
 
         fn on_initialized(&self) -> Result<(), glib::BoolError> {
@@ -214,13 +235,7 @@ mod imp {
             let enc: Vec<i32> = enc.into_iter().map(|x| x.to_glib()).collect();
             self.connection.set_encodings(&enc)?;
 
-            self.connection.framebuffer_update_request(
-                false,
-                0,
-                0,
-                self.connection.get_width().try_into().unwrap(),
-                self.connection.get_height().try_into().unwrap(),
-            )?;
+            self.framebuffer_update_request()?;
             Ok(())
         }
     }
