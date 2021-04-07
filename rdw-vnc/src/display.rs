@@ -6,7 +6,10 @@ use keycodemap::KEYMAP_XORGEVDEV2QNUM;
 use rdw::DisplayExt;
 
 mod imp {
-    use std::{cell::RefCell, convert::TryInto};
+    use std::{
+        cell::{Cell, RefCell},
+        convert::TryInto,
+    };
 
     use super::*;
     use crate::framebuffer::*;
@@ -44,6 +47,8 @@ mod imp {
         pub(crate) fb: RefCell<Option<Framebuffer>>,
         pub(crate) keycode_map: bool,
         pub(crate) allow_lossy: bool,
+        pub(crate) last_motion: Cell<Option<(f64, f64)>>,
+        pub(crate) last_button_mask: Cell<Option<u8>>,
     }
 
     impl Default for DisplayVnc {
@@ -53,6 +58,8 @@ mod imp {
                 fb: RefCell::new(None),
                 keycode_map: true,
                 allow_lossy: true,
+                last_motion: Cell::new(None),
+                last_button_mask: Cell::new(None),
             }
         }
     }
@@ -85,9 +92,23 @@ mod imp {
             obj.connect_motion(clone!(@weak obj => move |_, x, y| {
                 let self_ = Self::from_instance(&obj);
                 log::debug!("motion: {:?}", (x, y));
-                if let Err(e) = self_.connection.pointer_event(0, x as _, y as _) {
+                self_.last_motion.set(Some((x, y)));
+                let button_mask = self_.last_button_mask.get().unwrap_or(0);
+                if let Err(e) = self_.connection.pointer_event(button_mask, x as _, y as _) {
                     log::warn!("Failed to send pointer event: {}", e);
                 }
+            }));
+
+            obj.connect_mouse_press(clone!(@weak obj => move |_, button| {
+                let self_ = Self::from_instance(&obj);
+                log::debug!("mouse-press: {:?}", button);
+                self_.mouse_click(true, button);
+            }));
+
+            obj.connect_mouse_release(clone!(@weak obj => move |_, button| {
+                let self_ = Self::from_instance(&obj);
+                log::debug!("mouse-release: {:?}", button);
+                self_.mouse_click(false, button);
             }));
 
             self.connection.connect_vnc_auth_choose_type(|conn, va| {
@@ -208,6 +229,30 @@ mod imp {
                 if let Err(e) = self.connection.key_event(press, keyval, *qnum) {
                     log::warn!("Failed to send key event: {}", e);
                 }
+            }
+        }
+
+        fn mouse_click(&self, press: bool, button: u32) {
+            let (x, y) = self
+                .last_motion
+                .get()
+                .map_or((0, 0), |(x, y)| (x as _, y as _));
+            let mut button_mask = self.last_button_mask.get().unwrap_or(0);
+            let button = match button {
+                n if n <= 8 => 1 << (n - 1),
+                n => {
+                    log::warn!("Unhandled button event nth: {}", n);
+                    return;
+                }
+            };
+            if press {
+                button_mask |= button;
+            } else {
+                button_mask &= !button;
+            }
+            self.last_button_mask.set(Some(button_mask));
+            if let Err(e) = self.connection.pointer_event(button_mask, x, y) {
+                log::warn!("Failed to send key event: {}", e);
             }
         }
 
