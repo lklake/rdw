@@ -1,7 +1,9 @@
 use std::{cell::RefCell, sync::Arc};
 
 use gio::ApplicationFlags;
+use glib::clone;
 use gtk::{gio, glib, prelude::*};
+use rdw::DisplayExt;
 
 fn main() {
     env_logger::init();
@@ -80,6 +82,23 @@ fn main() {
             .connection()
             .open_host(&host, &format!("{}", port))
             .unwrap();
+        display.connect_property_grabbed_notify(clone!(@weak window => move |d| {
+            let mut title = "rdw-vnc example".to_string();
+            if !d.get_grabbed().is_empty() {
+                title = format!("{} - grabbed {:?}", title, d.get_grabbed())
+            }
+            window.set_title(Some(title.as_str()));
+        }));
+        display
+            .connection()
+            .connect_vnc_error(clone!(@weak app => move |_, msg|{
+                eprintln!("{}", msg);
+            }));
+        display
+            .connection()
+            .connect_vnc_disconnected(clone!(@weak app => move |_|{
+                app.quit();
+            }));
         window.set_child(Some(&display));
 
         window.show();

@@ -93,8 +93,24 @@ mod imp {
                 let self_ = Self::from_instance(&obj);
                 log::debug!("motion: {:?}", (x, y));
                 self_.last_motion.set(Some((x, y)));
+                if !obj.mouse_absolute() {
+                    return;
+                }
                 let button_mask = self_.last_button_mask.get().unwrap_or(0);
                 if let Err(e) = self_.connection.pointer_event(button_mask, x as _, y as _) {
+                    log::warn!("Failed to send pointer event: {}", e);
+                }
+            }));
+
+            obj.connect_motion_relative(clone!(@weak obj => move |_, dx, dy| {
+                let self_ = Self::from_instance(&obj);
+                log::debug!("motion-relative: {:?}", (dx, dy));
+                if obj.mouse_absolute() {
+                    return;
+                }
+                let button_mask = self_.last_button_mask.get().unwrap_or(0);
+                let (dx, dy) = (dx as i32 + 0x7fff, dy as i32 + 0x7fff);
+                if let Err(e) = self_.connection.pointer_event(button_mask, dx as _, dy as _) {
                     log::warn!("Failed to send pointer event: {}", e);
                 }
             }));
@@ -163,9 +179,11 @@ mod imp {
                 );
             }));
 
-            self.connection.connect_vnc_pointer_mode_changed(|_, abs| {
-                log::debug!("pointer-mode-changed: {}", abs);
-            });
+            self.connection
+                .connect_vnc_pointer_mode_changed(clone!(@weak obj => move |_, abs| {
+                    log::debug!("pointer-mode-changed: {}", abs);
+                    obj.set_mouse_absolute(abs);
+                }));
 
             self.connection.connect_vnc_server_cut_text(|_, text| {
                 log::debug!("server-cut-text: {}", text);
@@ -239,10 +257,14 @@ mod imp {
         }
 
         fn button_event(&self, press: bool, button: u8) {
-            let (x, y) = self
-                .last_motion
-                .get()
-                .map_or((0, 0), |(x, y)| (x as _, y as _));
+            let obj = self.get_instance();
+            let (x, y) = if obj.mouse_absolute() {
+                self.last_motion
+                    .get()
+                    .map_or((0, 0), |(x, y)| (x as _, y as _))
+            } else {
+                (0x7fff, 0x7fff)
+            };
             let button = 1 << (button - 1);
 
             let mut button_mask = self.last_button_mask.get().unwrap_or(0);

@@ -1,4 +1,4 @@
-use gtk::glib::{self, GEnum};
+use gtk::glib::{self, gflags, GEnum};
 
 mod display;
 mod egl;
@@ -15,6 +15,19 @@ pub enum Scroll {
     Down,
     Left,
     Right,
+}
+
+#[gflags("RdwGrab")]
+#[repr(C)]
+pub enum Grab {
+    MOUSE = 0b0000_0001,
+    KEYBOARD = 0b0000_0010,
+}
+
+impl std::default::Default for Grab {
+    fn default() -> Self {
+        Self::empty()
+    }
 }
 
 #[cfg(feature = "capi")]

@@ -1,9 +1,24 @@
 use gl::types::*;
-use glib::{clone, signal::SignalHandlerId, subclass::prelude::*, translate::FromGlibPtrBorrow};
-use gtk::{gdk, glib, prelude::*, subclass::prelude::GLAreaImpl};
+use glib::{
+    clone,
+    signal::SignalHandlerId,
+    subclass::prelude::*,
+    translate::{FromGlibPtrBorrow, ToGlib},
+};
+use gtk::{gdk, glib, graphene, prelude::*, subclass::prelude::GLAreaImpl};
 use std::cell::Cell;
 
-use crate::{egl, error::Error, util, Scroll};
+use wayland_client::{Display as WlDisplay, GlobalManager};
+use wayland_protocols::unstable::pointer_constraints::v1::client::zwp_locked_pointer_v1::ZwpLockedPointerV1;
+use wayland_protocols::unstable::pointer_constraints::v1::client::zwp_pointer_constraints_v1::{
+    Lifetime, ZwpPointerConstraintsV1,
+};
+use wayland_protocols::unstable::relative_pointer::v1::client::zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1;
+use wayland_protocols::unstable::relative_pointer::v1::client::zwp_relative_pointer_v1::{
+    Event as RelEvent, ZwpRelativePointerV1,
+};
+
+use crate::{egl, error::Error, util, Grab, Scroll};
 
 pub mod imp {
     use std::cell::RefCell;
@@ -41,15 +56,30 @@ pub mod imp {
 
     #[derive(Default)]
     pub struct Display {
-        pub key_controller: OnceCell<gtk::EventControllerKey>,
         // The remote display size, ex: 1024x768
         pub display_size: Cell<Option<(u32, u32)>>,
         // The currently defined cursor
         pub cursor: RefCell<Option<gdk::Cursor>>,
+        pub mouse_absolute: Cell<bool>,
+        // position of cursor when drawn by client
+        pub cursor_position: Cell<Option<(u32, u32)>>,
+
+        // the shortcut to ungrab key/mouse (to be configurable and extended with ctrl-alt)
+        pub grab_shortcut: OnceCell<gtk::ShortcutTrigger>,
+        pub grabbed: Cell<Grab>,
+        pub shortcuts_inhibited_id: Cell<Option<SignalHandlerId>>,
+
         pub texture_id: Cell<GLuint>,
         pub texture_blit_vao: Cell<GLuint>,
         pub texture_blit_prog: Cell<GLuint>,
         pub texture_blit_flip_prog: Cell<GLuint>,
+
+        pub wl_source: Cell<Option<glib::SourceId>>,
+        pub wl_event_queue: OnceCell<wayland_client::EventQueue>,
+        pub wl_rel_manager: OnceCell<wayland_client::Main<ZwpRelativePointerManagerV1>>,
+        pub wl_rel_pointer: RefCell<Option<wayland_client::Main<ZwpRelativePointerV1>>>,
+        pub wl_pointer_constraints: OnceCell<wayland_client::Main<ZwpPointerConstraintsV1>>,
+        pub wl_lock_pointer: RefCell<Option<wayland_client::Main<ZwpLockedPointerV1>>>,
     }
 
     #[glib::object_subclass]
@@ -73,6 +103,32 @@ pub mod imp {
     }
 
     impl ObjectImpl for Display {
+        fn constructed(&self, obj: &Self::Type) {
+            self.parent_constructed(obj);
+            self.grab_shortcut
+                .get_or_init(|| gtk::ShortcutTrigger::parse_string("<ctrl><alt>g").unwrap());
+        }
+
+        fn dispose(&self, _obj: &Self::Type) {
+            if let Some(source) = self.wl_source.take() {
+                glib::source_remove(source);
+            }
+        }
+
+        fn properties() -> &'static [glib::ParamSpec] {
+            static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
+                vec![glib::ParamSpec::flags(
+                    "grabbed",
+                    "grabbed",
+                    "Grabbed",
+                    Grab::static_type(),
+                    Grab::empty().to_glib(),
+                    glib::ParamFlags::READABLE,
+                )]
+            });
+            PROPERTIES.as_ref()
+        }
+
         fn signals() -> &'static [Signal] {
             static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
                 vec![
@@ -90,6 +146,12 @@ pub mod imp {
                     .build(),
                     Signal::builder(
                         "motion",
+                        &[f64::static_type().into(), f64::static_type().into()],
+                        <()>::static_type().into(),
+                    )
+                    .build(),
+                    Signal::builder(
+                        "motion-relative",
                         &[f64::static_type().into(), f64::static_type().into()],
                         <()>::static_type().into(),
                     )
@@ -124,6 +186,10 @@ pub mod imp {
             widget.set_has_stencil_buffer(false);
             widget.set_auto_render(false);
             widget.set_required_version(3, 2);
+            widget.set_sensitive(true);
+            widget.set_focusable(true);
+            widget.set_focus_on_click(true);
+
             self.parent_realize(widget);
             widget.make_current();
 
@@ -132,23 +198,24 @@ pub mod imp {
                 widget.set_error(Some(&e));
             }
 
-            widget.set_sensitive(true);
-            widget.set_focusable(true);
-            widget.set_focus_on_click(true);
+            if let Ok(dpy) = widget.get_display().downcast::<gdk_wl::WaylandDisplay>() {
+                self.realize_wl(&dpy);
+            }
 
             let ec = gtk::EventControllerKey::new();
             ec.set_propagation_phase(gtk::PropagationPhase::Capture);
             widget.add_controller(&ec);
             ec.connect_key_pressed(
-                clone!(@weak widget => @default-panic, move |_, keyval, keycode, _state| {
-                    widget.emit_by_name("key-press", &[&*keyval, &keycode]).unwrap();
+                clone!(@weak widget => @default-panic, move |ec, keyval, keycode, _state| {
+                    let self_ = Self::from_instance(&widget);
+                    self_.key_pressed(ec, keyval, keycode);
                     glib::signal::Inhibit(true)
                 }),
             );
             ec.connect_key_released(clone!(@weak widget => move |_, keyval, keycode, _state| {
-                widget.emit_by_name("key-release", &[&*keyval, &keycode]).unwrap();
+                let self_ = Self::from_instance(&widget);
+                self_.key_released(keyval, keycode);
             }));
-            self.key_controller.set(ec).unwrap();
 
             let ec = gtk::EventControllerMotion::new();
             widget.add_controller(&ec);
@@ -165,6 +232,9 @@ pub mod imp {
             ec.connect_pressed(
                 clone!(@weak widget => @default-panic, move |gesture, _n_press, x, y| {
                     let self_ = Self::from_instance(&widget);
+
+                    self_.try_grab();
+
                     let button = gesture.get_current_button();
                     if let Some((x, y)) = self_.transform_input(x, y) {
                         widget.emit_by_name("motion", &[&x, &y]).unwrap();
@@ -191,14 +261,37 @@ pub mod imp {
                     widget.emit_by_name("scroll-discrete", &[&Scroll::Down]).unwrap();
                 } else if dy <= -1.0 {
                     widget.emit_by_name("scroll-discrete", &[&Scroll::Up]).unwrap();
-                };
+                }
                 if dx >= 1.0 {
                     widget.emit_by_name("scroll-discrete", &[&Scroll::Right]).unwrap();
                 } else if dx <= -1.0 {
                     widget.emit_by_name("scroll-discrete", &[&Scroll::Left]).unwrap();
-                };
+                }
                 glib::signal::Inhibit(false)
             }));
+        }
+
+        fn snapshot(&self, widget: &Self::Type, snapshot: &gtk::Snapshot) {
+            self.parent_snapshot(widget, snapshot);
+
+            if !self.mouse_absolute.get() {
+                if let Some(pos) = self.cursor_position.get() {
+                    if let Some(cursor) = &*self.cursor.borrow() {
+                        if let Some(texture) = cursor.get_texture() {
+                            let sf = widget.get_scale_factor();
+                            snapshot.append_texture(
+                                &texture,
+                                &graphene::Rect::new(
+                                    (pos.0 as i32 - cursor.get_hotspot_x() / sf) as f32,
+                                    (pos.0 as i32 - cursor.get_hotspot_y() / sf) as f32,
+                                    (texture.get_width() / sf) as f32,
+                                    (texture.get_height() / sf) as f32,
+                                ),
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -219,6 +312,37 @@ pub mod imp {
     }
 
     impl Display {
+        fn realize_wl(&self, dpy: &gdk_wl::WaylandDisplay) {
+            let display = unsafe {
+                WlDisplay::from_external_display(dpy.get_wl_display().as_ref().c_ptr() as *mut _)
+            };
+            let mut event_queue = display.create_event_queue();
+            let attached_display = display.attach(event_queue.token());
+            let globals = GlobalManager::new(&attached_display);
+            event_queue
+                .sync_roundtrip(&mut (), |_, _, _| unreachable!())
+                .unwrap();
+            let rel_manager = globals
+                .instantiate_exact::<ZwpRelativePointerManagerV1>(1)
+                .unwrap();
+            self.wl_rel_manager.set(rel_manager).unwrap();
+            let pointer_constraints = globals
+                .instantiate_exact::<ZwpPointerConstraintsV1>(1)
+                .unwrap();
+            self.wl_pointer_constraints
+                .set(pointer_constraints)
+                .unwrap();
+            let fd = display.get_connection_fd();
+            // I can't find a better way to hook it to gdk...
+            let source = glib::unix_fd_add_local(fd, glib::IOCondition::IN, move |_, _| {
+                event_queue
+                    .sync_roundtrip(&mut (), |_, _, _| unreachable!())
+                    .unwrap();
+                glib::Continue(true)
+            });
+            self.wl_source.set(Some(source))
+        }
+
         unsafe fn realize_gl(&self) -> Result<(), String> {
             use std::ffi::CString;
 
@@ -268,6 +392,176 @@ pub mod imp {
             self.texture_id.set(tex_id);
 
             Ok(())
+        }
+
+        fn key_pressed(&self, ec: &gtk::EventControllerKey, keyval: gdk::keys::Key, keycode: u32) {
+            let display = self.get_instance();
+
+            if let Some(ref e) = ec.get_current_event() {
+                if self.grab_shortcut.get().unwrap().trigger(e, false) == gdk::KeyMatch::Exact {
+                    if self.grabbed.get().is_empty() {
+                        self.try_grab();
+                    } else {
+                        if self.grabbed.get().contains(Grab::KEYBOARD) {
+                            //display.remove_controller(ec); here crashes badly
+                            glib::idle_add_local(
+                                clone!(@weak ec, @weak display => @default-panic, move || {
+                                    let self_ = Self::from_instance(&display);
+                                    if let Some(widget) = ec.get_widget() {
+                                        widget.remove_controller(&ec);
+                                    }
+                                    if let Some(toplevel) = self_.get_toplevel() {
+                                        // will also notify the grab change
+                                        toplevel.restore_system_shortcuts();
+                                    }
+                                    glib::Continue(false)
+                                }),
+                            );
+                        }
+                        if self.grabbed.get().contains(Grab::MOUSE) {
+                            if let Some(lock) = self.wl_lock_pointer.take() {
+                                lock.destroy();
+                            }
+                            if let Some(rel_pointer) = self.wl_rel_pointer.take() {
+                                rel_pointer.destroy();
+                            }
+                            self.grabbed.set(self.grabbed.get() - Grab::MOUSE);
+                            display.notify("grabbed");
+                        }
+                    }
+                    return;
+                }
+            }
+
+            display
+                .emit_by_name("key-press", &[&*keyval, &keycode])
+                .unwrap();
+        }
+
+        fn key_released(&self, keyval: gdk::keys::Key, keycode: u32) {
+            let display = self.get_instance();
+
+            display
+                .emit_by_name("key-release", &[&*keyval, &keycode])
+                .unwrap();
+        }
+
+        fn try_grab_keyboard(&self) -> bool {
+            if self.grabbed.get().contains(Grab::KEYBOARD) {
+                return false;
+            }
+
+            let obj = self.get_instance();
+            let toplevel = match self.get_toplevel() {
+                Some(toplevel) => toplevel,
+                _ => return false,
+            };
+
+            toplevel.inhibit_system_shortcuts::<gdk::ButtonEvent>(None);
+            let ec = gtk::EventControllerKey::new();
+            ec.set_propagation_phase(gtk::PropagationPhase::Capture);
+            ec.connect_key_pressed(clone!(@weak obj, @weak toplevel => @default-panic, move |ec, keyval, keycode, _state| {
+                let self_ = Self::from_instance(&obj);
+                self_.key_pressed(ec, keyval, keycode);
+                glib::signal::Inhibit(true)
+            }));
+            ec.connect_key_released(
+                clone!(@weak obj => @default-panic, move |_ec, keyval, keycode, _state| {
+                    let self_ = Self::from_instance(&obj);
+                    self_.key_released(keyval, keycode);
+                }),
+            );
+            if let Some(root) = obj.get_root() {
+                root.add_controller(&ec);
+            }
+
+            let id = toplevel.connect_property_shortcuts_inhibited_notify(
+                clone!(@weak obj => @default-panic, move |toplevel| {
+                    let inhibited = toplevel.get_property_shortcuts_inhibited();
+                    log::debug!("shortcuts-inhibited: {}", inhibited);
+                    if !inhibited {
+                        let self_ = Self::from_instance(&obj);
+                        let id = self_.shortcuts_inhibited_id.take();
+                        toplevel.disconnect(id.unwrap());
+                        self_.grabbed.set(self_.grabbed.get() - Grab::KEYBOARD);
+                        obj.notify("grabbed");
+                    }
+                }),
+            );
+            self.shortcuts_inhibited_id.set(Some(id));
+            true
+        }
+
+        fn try_grab_device(&self, device: gdk::Device) -> bool {
+            let device = match device.downcast::<gdk_wl::WaylandDevice>() {
+                Ok(device) => device,
+                _ => return false,
+            };
+            let pointer = device.get_wl_pointer();
+            let obj = self.get_instance();
+
+            if self.wl_lock_pointer.borrow().is_none() {
+                if let Some(constraints) = self.wl_pointer_constraints.get() {
+                    if let Some(surf) = self.get_wl_surface() {
+                        let lock = constraints.lock_pointer(
+                            &surf,
+                            &pointer,
+                            None,
+                            Lifetime::Persistent as _,
+                        );
+                        lock.quick_assign(move |_, event, _| {
+                            log::debug!("wl lock pointer event: {:?}", event);
+                        });
+                        self.wl_lock_pointer.replace(Some(lock));
+                    }
+                }
+            }
+
+            if self.wl_rel_pointer.borrow().is_none() {
+                if let Some(rel_manager) = self.wl_rel_manager.get() {
+                    let rel_pointer = rel_manager.get_relative_pointer(&pointer);
+                    rel_pointer.quick_assign(
+                        clone!(@weak obj => @default-panic, move |_, event, _| {
+                            if let RelEvent::RelativeMotion { dx_unaccel, dy_unaccel, .. } = event {
+                                let scale = obj.get_scale_factor() as f64;
+                                let (dx, dy) = (dx_unaccel / scale, dy_unaccel / scale);
+                                obj.emit_by_name("motion-relative", &[&dx, &dy]).unwrap();
+                            }
+                        }),
+                    );
+                    self.wl_rel_pointer.replace(Some(rel_pointer));
+                }
+            }
+
+            true
+        }
+
+        fn try_grab_mouse(&self) -> bool {
+            if self.grabbed.get().contains(Grab::MOUSE) {
+                return false;
+            }
+
+            let obj = self.get_instance();
+            let default_seat = obj.get_display().get_default_seat();
+
+            for device in default_seat.get_devices(gdk::SeatCapabilities::POINTER) {
+                self.try_grab_device(device);
+            }
+
+            true
+        }
+
+        fn try_grab(&self) {
+            let display = self.get_instance();
+            let mut grabbed = self.grabbed.get();
+            if self.try_grab_keyboard() {
+                grabbed |= Grab::KEYBOARD;
+            }
+            if self.try_grab_mouse() {
+                grabbed |= Grab::MOUSE;
+            }
+            self.grabbed.set(grabbed);
+            display.notify("grabbed");
         }
 
         pub(crate) fn texture_id(&self) -> GLuint {
@@ -336,6 +630,24 @@ pub mod imp {
                 Some((x, y))
             })
         }
+
+        fn get_toplevel(&self) -> Option<gdk::Toplevel> {
+            let display = self.get_instance();
+            display
+                .get_root()
+                .and_then(|r| r.get_native())
+                .and_then(|n| n.get_surface())
+                .and_then(|s| s.downcast::<gdk::Toplevel>().ok())
+        }
+
+        fn get_wl_surface(&self) -> Option<wayland_client::protocol::wl_surface::WlSurface> {
+            let display = self.get_instance();
+            display
+                .get_native()
+                .and_then(|n| n.get_surface())
+                .and_then(|s| s.downcast::<gdk_wl::WaylandSurface>().ok())
+                .map(|w| w.get_wl_surface())
+        }
     }
 }
 
@@ -378,6 +690,14 @@ pub trait DisplayExt: 'static {
 
     fn define_cursor(&self, cursor: Option<gdk::Cursor>);
 
+    fn mouse_absolute(&self) -> bool;
+
+    fn set_mouse_absolute(&self, absolute: bool);
+
+    fn set_cursor_position(&self, pos: Option<(u32, u32)>);
+
+    fn get_grabbed(&self) -> Grab;
+
     fn update_area(&self, x: i32, y: i32, w: i32, h: i32, stride: i32, data: &[u8]);
 
     fn connect_key_press<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId;
@@ -386,11 +706,15 @@ pub trait DisplayExt: 'static {
 
     fn connect_motion<F: Fn(&Self, f64, f64) + 'static>(&self, f: F) -> SignalHandlerId;
 
+    fn connect_motion_relative<F: Fn(&Self, f64, f64) + 'static>(&self, f: F) -> SignalHandlerId;
+
     fn connect_mouse_press<F: Fn(&Self, u32) + 'static>(&self, f: F) -> SignalHandlerId;
 
     fn connect_mouse_release<F: Fn(&Self, u32) + 'static>(&self, f: F) -> SignalHandlerId;
 
     fn connect_scroll_discrete<F: Fn(&Self, Scroll) + 'static>(&self, f: F) -> SignalHandlerId;
+
+    fn connect_property_grabbed_notify<F: Fn(&Self) + 'static>(&self, f: F) -> SignalHandlerId;
 }
 
 impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
@@ -433,6 +757,39 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
         // TODO: for now client side only
         self.set_cursor(cursor.as_ref());
         self_.cursor.replace(cursor);
+    }
+
+    fn mouse_absolute(&self) -> bool {
+        // Safety: safe because IsA<Display>
+        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
+
+        self_.mouse_absolute.get()
+    }
+
+    fn set_mouse_absolute(&self, absolute: bool) {
+        // Safety: safe because IsA<Display>
+        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
+
+        self_.mouse_absolute.set(absolute);
+    }
+
+    fn set_cursor_position(&self, pos: Option<(u32, u32)>) {
+        // Safety: safe because IsA<Display>
+        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
+
+        if pos.is_some() {
+            self.set_cursor_from_name(Some("none"));
+        } else {
+            self.set_cursor(self_.cursor.borrow().as_ref());
+        }
+        self_.cursor_position.set(pos);
+    }
+
+    fn get_grabbed(&self) -> Grab {
+        // Safety: safe because IsA<Display>
+        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
+
+        self_.grabbed.get()
     }
 
     fn update_area(&self, x: i32, y: i32, w: i32, h: i32, stride: i32, data: &[u8]) {
@@ -543,6 +900,33 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
         }
     }
 
+    fn connect_motion_relative<F: Fn(&Self, f64, f64) + 'static>(&self, f: F) -> SignalHandlerId {
+        unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, f64, f64) + 'static>(
+            this: *mut imp::RdwDisplay,
+            dx: f64,
+            dy: f64,
+            f: glib::ffi::gpointer,
+        ) where
+            P: IsA<Display>,
+        {
+            let f = &*(f as *const F);
+            f(
+                &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
+                dx,
+                dy,
+            )
+        }
+        unsafe {
+            let f: Box<F> = Box::new(f);
+            glib::signal::connect_raw(
+                self.as_ptr() as *mut glib::gobject_ffi::GObject,
+                b"motion-relative\0".as_ptr() as *const _,
+                Some(std::mem::transmute(connect_trampoline::<Self, F> as usize)),
+                Box::into_raw(f),
+            )
+        }
+    }
+
     fn connect_mouse_press<F: Fn(&Self, u32) + 'static>(&self, f: F) -> SignalHandlerId {
         unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, u32) + 'static>(
             this: *mut imp::RdwDisplay,
@@ -613,6 +997,30 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
                 self.as_ptr() as *mut glib::gobject_ffi::GObject,
                 b"scroll-discrete\0".as_ptr() as *const _,
                 Some(std::mem::transmute(connect_trampoline::<Self, F> as usize)),
+                Box::into_raw(f),
+            )
+        }
+    }
+
+    fn connect_property_grabbed_notify<F: Fn(&Self) + 'static>(&self, f: F) -> SignalHandlerId {
+        unsafe extern "C" fn notify_trampoline<P, F: Fn(&P) + 'static>(
+            this: *mut imp::RdwDisplay,
+            _param_spec: glib::ffi::gpointer,
+            f: glib::ffi::gpointer,
+        ) where
+            P: IsA<Display>,
+        {
+            let f: &F = &*(f as *const F);
+            f(&Display::from_glib_borrow(this).unsafe_cast_ref())
+        }
+        unsafe {
+            let f: Box<F> = Box::new(f);
+            glib::signal::connect_raw(
+                self.as_ptr() as *mut _,
+                b"notify::grabbed\0".as_ptr() as *const _,
+                Some(std::mem::transmute::<_, unsafe extern "C" fn()>(
+                    notify_trampoline::<Self, F> as *const (),
+                )),
                 Box::into_raw(f),
             )
         }
