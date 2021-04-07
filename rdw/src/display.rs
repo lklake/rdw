@@ -94,6 +94,18 @@ pub mod imp {
                         <()>::static_type().into(),
                     )
                     .build(),
+                    Signal::builder(
+                        "mouse-press",
+                        &[u32::static_type().into()],
+                        <()>::static_type().into(),
+                    )
+                    .build(),
+                    Signal::builder(
+                        "mouse-release",
+                        &[u32::static_type().into()],
+                        <()>::static_type().into(),
+                    )
+                    .build(),
                 ]
             });
             SIGNALS.as_ref()
@@ -139,6 +151,28 @@ pub mod imp {
                 if let Some((x, y)) = self_.transform_input(x, y) {
                     widget.emit_by_name("motion", &[&x, &y]).unwrap();
                 }
+            }));
+
+            let ec = gtk::GestureClick::new();
+            ec.set_button(0);
+            widget.add_controller(&ec);
+            ec.connect_pressed(
+                clone!(@weak widget => @default-panic, move |gesture, _n_press, x, y| {
+                    let self_ = Self::from_instance(&widget);
+                    let button = gesture.get_current_button();
+                    if let Some((x, y)) = self_.transform_input(x, y) {
+                        widget.emit_by_name("motion", &[&x, &y]).unwrap();
+                    }
+                    widget.emit_by_name("mouse-press", &[&button]).unwrap();
+                }),
+            );
+            ec.connect_released(clone!(@weak widget => move |gesture, _n_press, x, y| {
+                let self_ = Self::from_instance(&widget);
+                let button = gesture.get_current_button();
+                if let Some((x, y)) = self_.transform_input(x, y) {
+                    widget.emit_by_name("motion", &[&x, &y]).unwrap();
+                }
+                widget.emit_by_name("mouse-release", &[&button]).unwrap();
             }));
         }
     }
@@ -326,6 +360,10 @@ pub trait DisplayExt: 'static {
     fn connect_key_release<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId;
 
     fn connect_motion<F: Fn(&Self, f64, f64) + 'static>(&self, f: F) -> SignalHandlerId;
+
+    fn connect_mouse_press<F: Fn(&Self, u32) + 'static>(&self, f: F) -> SignalHandlerId;
+
+    fn connect_mouse_release<F: Fn(&Self, u32) + 'static>(&self, f: F) -> SignalHandlerId;
 }
 
 impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
@@ -472,6 +510,56 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
             glib::signal::connect_raw(
                 self.as_ptr() as *mut glib::gobject_ffi::GObject,
                 b"motion\0".as_ptr() as *const _,
+                Some(std::mem::transmute(connect_trampoline::<Self, F> as usize)),
+                Box::into_raw(f),
+            )
+        }
+    }
+
+    fn connect_mouse_press<F: Fn(&Self, u32) + 'static>(&self, f: F) -> SignalHandlerId {
+        unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, u32) + 'static>(
+            this: *mut imp::RdwDisplay,
+            button: u32,
+            f: glib::ffi::gpointer,
+        ) where
+            P: IsA<Display>,
+        {
+            let f = &*(f as *const F);
+            f(
+                &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
+                button,
+            )
+        }
+        unsafe {
+            let f: Box<F> = Box::new(f);
+            glib::signal::connect_raw(
+                self.as_ptr() as *mut glib::gobject_ffi::GObject,
+                b"mouse-press\0".as_ptr() as *const _,
+                Some(std::mem::transmute(connect_trampoline::<Self, F> as usize)),
+                Box::into_raw(f),
+            )
+        }
+    }
+
+    fn connect_mouse_release<F: Fn(&Self, u32) + 'static>(&self, f: F) -> SignalHandlerId {
+        unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, u32) + 'static>(
+            this: *mut imp::RdwDisplay,
+            button: u32,
+            f: glib::ffi::gpointer,
+        ) where
+            P: IsA<Display>,
+        {
+            let f = &*(f as *const F);
+            f(
+                &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
+                button,
+            )
+        }
+        unsafe {
+            let f: Box<F> = Box::new(f);
+            glib::signal::connect_raw(
+                self.as_ptr() as *mut glib::gobject_ffi::GObject,
+                b"mouse-release\0".as_ptr() as *const _,
                 Some(std::mem::transmute(connect_trampoline::<Self, F> as usize)),
                 Box::into_raw(f),
             )
