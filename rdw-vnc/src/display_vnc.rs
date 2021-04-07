@@ -111,6 +111,12 @@ mod imp {
                 self_.mouse_click(false, button);
             }));
 
+            obj.connect_scroll_discrete(clone!(@weak obj => move |_, scroll| {
+                let self_ = Self::from_instance(&obj);
+                log::debug!("scroll-discrete: {:?}", scroll);
+                self_.scroll(scroll);
+            }));
+
             self.connection.connect_vnc_auth_choose_type(|conn, va| {
                 use gvnc::ConnectionAuth::*;
                 log::debug!("auth-choose-type: {:?}", va);
@@ -232,28 +238,43 @@ mod imp {
             }
         }
 
-        fn mouse_click(&self, press: bool, button: u32) {
+        fn button_event(&self, press: bool, button: u8) {
             let (x, y) = self
                 .last_motion
                 .get()
                 .map_or((0, 0), |(x, y)| (x as _, y as _));
+            let button = 1 << (button - 1);
+
             let mut button_mask = self.last_button_mask.get().unwrap_or(0);
-            let button = match button {
-                n if n <= 8 => 1 << (n - 1),
-                n => {
-                    log::warn!("Unhandled button event nth: {}", n);
-                    return;
-                }
-            };
             if press {
                 button_mask |= button;
             } else {
                 button_mask &= !button;
             }
             self.last_button_mask.set(Some(button_mask));
+
             if let Err(e) = self.connection.pointer_event(button_mask, x, y) {
                 log::warn!("Failed to send key event: {}", e);
             }
+        }
+
+        fn mouse_click(&self, press: bool, button: u32) {
+            if button > 3 {
+                log::warn!("Unhandled button event nth: {}", button);
+                return;
+            }
+            self.button_event(press, button as _)
+        }
+
+        fn scroll(&self, scroll: rdw::Scroll) {
+            let n = match scroll {
+                rdw::Scroll::Up => 4,
+                rdw::Scroll::Down => 5,
+                rdw::Scroll::Left => 6,
+                rdw::Scroll::Right => 7,
+            };
+            self.button_event(true, n);
+            self.button_event(false, n);
         }
 
         fn do_framebuffer_init(&self) {
