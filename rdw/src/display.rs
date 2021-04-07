@@ -3,7 +3,7 @@ use glib::{clone, signal::SignalHandlerId, subclass::prelude::*, translate::From
 use gtk::{gdk, glib, prelude::*, subclass::prelude::GLAreaImpl};
 use std::cell::Cell;
 
-use crate::{egl, error::Error, util};
+use crate::{egl, error::Error, util, Scroll};
 
 pub mod imp {
     use std::cell::RefCell;
@@ -106,6 +106,12 @@ pub mod imp {
                         <()>::static_type().into(),
                     )
                     .build(),
+                    Signal::builder(
+                        "scroll-discrete",
+                        &[Scroll::static_type().into()],
+                        <()>::static_type().into(),
+                    )
+                    .build(),
                 ]
             });
             SIGNALS.as_ref()
@@ -173,6 +179,25 @@ pub mod imp {
                     widget.emit_by_name("motion", &[&x, &y]).unwrap();
                 }
                 widget.emit_by_name("mouse-release", &[&button]).unwrap();
+            }));
+
+            let ec = gtk::EventControllerScroll::new(
+                gtk::EventControllerScrollFlags::BOTH_AXES
+                    | gtk::EventControllerScrollFlags::DISCRETE,
+            );
+            widget.add_controller(&ec);
+            ec.connect_scroll(clone!(@weak widget => @default-panic, move |_, dx, dy| {
+                if dy >= 1.0 {
+                    widget.emit_by_name("scroll-discrete", &[&Scroll::Down]).unwrap();
+                } else if dy <= -1.0 {
+                    widget.emit_by_name("scroll-discrete", &[&Scroll::Up]).unwrap();
+                };
+                if dx >= 1.0 {
+                    widget.emit_by_name("scroll-discrete", &[&Scroll::Right]).unwrap();
+                } else if dx <= -1.0 {
+                    widget.emit_by_name("scroll-discrete", &[&Scroll::Left]).unwrap();
+                };
+                glib::signal::Inhibit(false)
             }));
         }
     }
@@ -364,6 +389,8 @@ pub trait DisplayExt: 'static {
     fn connect_mouse_press<F: Fn(&Self, u32) + 'static>(&self, f: F) -> SignalHandlerId;
 
     fn connect_mouse_release<F: Fn(&Self, u32) + 'static>(&self, f: F) -> SignalHandlerId;
+
+    fn connect_scroll_discrete<F: Fn(&Self, Scroll) + 'static>(&self, f: F) -> SignalHandlerId;
 }
 
 impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
@@ -560,6 +587,31 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
             glib::signal::connect_raw(
                 self.as_ptr() as *mut glib::gobject_ffi::GObject,
                 b"mouse-release\0".as_ptr() as *const _,
+                Some(std::mem::transmute(connect_trampoline::<Self, F> as usize)),
+                Box::into_raw(f),
+            )
+        }
+    }
+
+    fn connect_scroll_discrete<F: Fn(&Self, Scroll) + 'static>(&self, f: F) -> SignalHandlerId {
+        unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, Scroll) + 'static>(
+            this: *mut imp::RdwDisplay,
+            scroll: Scroll,
+            f: glib::ffi::gpointer,
+        ) where
+            P: IsA<Display>,
+        {
+            let f = &*(f as *const F);
+            f(
+                &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
+                scroll,
+            )
+        }
+        unsafe {
+            let f: Box<F> = Box::new(f);
+            glib::signal::connect_raw(
+                self.as_ptr() as *mut glib::gobject_ffi::GObject,
+                b"scroll-discrete\0".as_ptr() as *const _,
                 Some(std::mem::transmute(connect_trampoline::<Self, F> as usize)),
                 Box::into_raw(f),
             )
