@@ -58,6 +58,7 @@ pub mod imp {
     #[derive(Default)]
     pub struct Display {
         pub(crate) gl_area: OnceCell<gtk::GLArea>,
+        pub(crate) layout_manager: OnceCell<gtk::BinLayout>,
 
         // The remote display size, ex: 1024x768
         pub(crate) display_size: Cell<Option<(u32, u32)>>,
@@ -108,7 +109,7 @@ pub mod imp {
     impl ObjectImpl for Display {
         fn constructed(&self, obj: &Self::Type) {
             self.parent_constructed(obj);
-            obj.set_layout_manager(Some(&gtk::BinLayout::new()));
+            self.layout_manager.set(gtk::BinLayout::new()).unwrap();
 
             let gl_area = gtk::GLArea::new();
             gl_area.set_has_depth_buffer(false);
@@ -315,6 +316,10 @@ pub mod imp {
 
         fn size_allocate(&self, widget: &Self::Type, width: i32, height: i32, baseline: i32) {
             self.parent_size_allocate(widget, width, height, baseline);
+            self.layout_manager
+                .get()
+                .unwrap()
+                .allocate(widget, width, height, baseline);
 
             if let Some(timeout_id) = self.resize_timeout_id.take() {
                 glib::source_remove(timeout_id);
