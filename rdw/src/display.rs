@@ -175,48 +175,56 @@ pub mod imp {
                         &[u32::static_type().into(), u32::static_type().into()],
                         <()>::static_type().into(),
                     )
+                    .flags(glib::SignalFlags::ACTION)
                     .build(),
                     Signal::builder(
                         "key-release",
                         &[u32::static_type().into(), u32::static_type().into()],
                         <()>::static_type().into(),
                     )
+                    .flags(glib::SignalFlags::ACTION)
                     .build(),
                     Signal::builder(
                         "motion",
                         &[f64::static_type().into(), f64::static_type().into()],
                         <()>::static_type().into(),
                     )
+                    .flags(glib::SignalFlags::ACTION)
                     .build(),
                     Signal::builder(
                         "motion-relative",
                         &[f64::static_type().into(), f64::static_type().into()],
                         <()>::static_type().into(),
                     )
+                    .flags(glib::SignalFlags::ACTION)
                     .build(),
                     Signal::builder(
                         "mouse-press",
                         &[u32::static_type().into()],
                         <()>::static_type().into(),
                     )
+                    .flags(glib::SignalFlags::ACTION)
                     .build(),
                     Signal::builder(
                         "mouse-release",
                         &[u32::static_type().into()],
                         <()>::static_type().into(),
                     )
+                    .flags(glib::SignalFlags::ACTION)
                     .build(),
                     Signal::builder(
                         "scroll-discrete",
                         &[Scroll::static_type().into()],
                         <()>::static_type().into(),
                     )
+                    .flags(glib::SignalFlags::ACTION)
                     .build(),
                     Signal::builder(
                         "resize-request",
                         &[u32::static_type().into(), u32::static_type().into()],
                         <()>::static_type().into(),
                     )
+                    .flags(glib::SignalFlags::ACTION)
                     .build(),
                 ]
             });
