@@ -6,7 +6,7 @@ use glib::{
     translate::{FromGlibPtrBorrow, ToGlib},
     SourceId,
 };
-use gtk::{gdk, glib, graphene, prelude::*, subclass::prelude::GLAreaImpl};
+use gtk::{gdk, glib, graphene, prelude::*, subclass::prelude::WidgetImpl};
 use std::cell::Cell;
 
 use wayland_client::{Display as WlDisplay, GlobalManager};
@@ -31,7 +31,7 @@ pub mod imp {
 
     #[repr(C)]
     pub struct RdwDisplayClass {
-        pub parent_class: gtk::ffi::GtkGLAreaClass,
+        pub parent_class: gtk::ffi::GtkWidgetClass,
     }
 
     unsafe impl ClassStruct for RdwDisplayClass {
@@ -40,7 +40,7 @@ pub mod imp {
 
     #[repr(C)]
     pub struct RdwDisplay {
-        parent: gtk::ffi::GtkGLArea,
+        parent: gtk::ffi::GtkWidget,
     }
 
     impl std::fmt::Debug for RdwDisplay {
@@ -57,6 +57,7 @@ pub mod imp {
 
     #[derive(Default)]
     pub struct Display {
+        pub gl_area: OnceCell<gtk::GLArea>,
         // The remote display size, ex: 1024x768
         pub display_size: Cell<Option<(u32, u32)>>,
         pub resize_timeout_id: Cell<Option<SourceId>>,
@@ -88,7 +89,7 @@ pub mod imp {
     impl ObjectSubclass for Display {
         const NAME: &'static str = "RdwDisplay";
         type Type = super::Display;
-        type ParentType = gtk::GLArea;
+        type ParentType = gtk::Widget;
         type Class = RdwDisplayClass;
         type Instance = RdwDisplay;
 
@@ -107,13 +108,48 @@ pub mod imp {
     impl ObjectImpl for Display {
         fn constructed(&self, obj: &Self::Type) {
             self.parent_constructed(obj);
+            obj.set_layout_manager(Some(&gtk::BinLayout::new()));
+
+            let gl_area = gtk::GLArea::new();
+            gl_area.set_has_depth_buffer(false);
+            gl_area.set_has_stencil_buffer(false);
+            gl_area.set_auto_render(false);
+            gl_area.set_required_version(3, 2);
+            gl_area.connect_render(clone!(@weak obj => @default-return glib::signal::Inhibit(true), move |_, _| unsafe {
+                let self_ = Self::from_instance(&obj);
+
+                gl::ClearColor(0.1, 0.1, 0.1, 1.0);
+                gl::Clear(gl::COLOR_BUFFER_BIT);
+                gl::Disable(gl::BLEND);
+
+                if let Some(vp) = self_.viewport() {
+                    gl::Viewport(vp.x, vp.y, vp.width, vp.height);
+                    self_.texture_blit(false);
+                }
+
+                glib::signal::Inhibit(true)
+            }));
+            gl_area.connect_realize(clone!(@weak obj => move |_| {
+                let self_ = Self::from_instance(&obj);
+                if let Err(e) = unsafe { self_.realize_gl() } {
+                    let e = glib::Error::new(Error::GL, &e);
+                    self_.gl_area().set_error(Some(&e));
+                }
+            }));
+
+            gl_area.set_parent(obj);
+            self.gl_area.set(gl_area).unwrap();
+
             self.grab_shortcut
                 .get_or_init(|| gtk::ShortcutTrigger::parse_string("<ctrl><alt>g").unwrap());
         }
 
-        fn dispose(&self, _obj: &Self::Type) {
+        fn dispose(&self, obj: &Self::Type) {
             if let Some(source) = self.wl_source.take() {
                 glib::source_remove(source);
+            }
+            while let Some(child) = obj.get_first_child() {
+                child.unparent();
             }
         }
 
@@ -190,21 +226,11 @@ pub mod imp {
 
     impl WidgetImpl for Display {
         fn realize(&self, widget: &Self::Type) {
-            widget.set_has_depth_buffer(false);
-            widget.set_has_stencil_buffer(false);
-            widget.set_auto_render(false);
-            widget.set_required_version(3, 2);
+            self.parent_realize(widget);
+
             widget.set_sensitive(true);
             widget.set_focusable(true);
             widget.set_focus_on_click(true);
-
-            self.parent_realize(widget);
-            widget.make_current();
-
-            if let Err(e) = unsafe { self.realize_gl() } {
-                let e = glib::Error::new(Error::GL, &e);
-                widget.set_error(Some(&e));
-            }
 
             if let Ok(dpy) = widget.get_display().downcast::<gdk_wl::WaylandDisplay>() {
                 self.realize_wl(&dpy);
@@ -320,22 +346,6 @@ pub mod imp {
         }
     }
 
-    impl GLAreaImpl for Display {
-        fn render(&self, _gl_area: &Self::Type, _context: &gdk::GLContext) -> bool {
-            unsafe {
-                gl::ClearColor(0.1, 0.1, 0.1, 1.0);
-                gl::Clear(gl::COLOR_BUFFER_BIT);
-                gl::Disable(gl::BLEND);
-
-                if let Some(vp) = self.viewport() {
-                    gl::Viewport(vp.x, vp.y, vp.width, vp.height);
-                    self.texture_blit(false);
-                }
-            }
-            false
-        }
-    }
-
     impl Display {
         fn realize_wl(&self, dpy: &gdk_wl::WaylandDisplay) {
             let display = unsafe {
@@ -368,8 +378,14 @@ pub mod imp {
             self.wl_source.set(Some(source))
         }
 
+        pub(crate) fn gl_area(&self) -> &gtk::GLArea {
+            self.gl_area.get().unwrap()
+        }
+
         unsafe fn realize_gl(&self) -> Result<(), String> {
             use std::ffi::CString;
+
+            self.gl_area().make_current();
 
             let texture_blit_vs = CString::new(include_str!("texture-blit.vert")).unwrap();
             let texture_blit_flip_vs =
@@ -757,7 +773,7 @@ pub trait DisplayExt: 'static {
     fn connect_resize_request<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId;
 }
 
-impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
+impl<O: IsA<Display> + IsA<gtk::Widget>> DisplayExt for O {
     fn display_size(&self) -> Option<(u32, u32)> {
         // Safety: safe because IsA<Display>
         let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
@@ -768,7 +784,7 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
     fn set_display_size(&self, size: Option<(u32, u32)>) {
         // Safety: safe because IsA<Display>
         let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
-        self.make_current();
+        self_.gl_area().make_current();
 
         if let Some((width, height)) = size {
             unsafe {
@@ -839,7 +855,7 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
     fn update_area(&self, x: i32, y: i32, w: i32, h: i32, stride: i32, data: &[u8]) {
         // Safety: safe because IsA<Display>
         let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
-        self.make_current();
+        self_.gl_area().make_current();
 
         // TODO: check data boundaries
         unsafe {
@@ -860,7 +876,7 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
             );
         }
 
-        self.queue_render();
+        self_.gl_area().queue_render();
     }
 
     fn connect_key_press<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId {
@@ -1097,7 +1113,7 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
     }
 }
 
-pub trait DisplayImpl: DisplayImplExt + GLAreaImpl {}
+pub trait DisplayImpl: DisplayImplExt + WidgetImpl {}
 
 pub trait DisplayImplExt: ObjectSubclass {}
 
@@ -1114,5 +1130,5 @@ unsafe impl<T: DisplayImpl> IsSubclassable<T> for Display {
 }
 
 glib::wrapper! {
-    pub struct Display(ObjectSubclass<imp::Display>) @extends gtk::GLArea, gtk::Widget;
+    pub struct Display(ObjectSubclass<imp::Display>) @extends gtk::Widget;
 }
