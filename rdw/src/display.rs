@@ -314,6 +314,36 @@ pub mod imp {
             }));
         }
 
+        fn measure(
+            &self,
+            _widget: &Self::Type,
+            orientation: gtk::Orientation,
+            _for_size: i32,
+            min: &mut i32,
+            nat: &mut i32,
+            _min_base: &mut i32,
+            _nat_base: &mut i32,
+        ) {
+            // TODO: this is not working as expected yet..
+            match self.display_size.get() {
+                Some((w, h)) => match orientation {
+                    gtk::Orientation::Horizontal => {
+                        *min = 128;
+                        *nat = w as _;
+                    }
+                    gtk::Orientation::Vertical => {
+                        *min = 128;
+                        *nat = h as _;
+                    }
+                    _ => panic!(),
+                },
+                None => {
+                    *min = 0;
+                    *nat = 0;
+                }
+            }
+        }
+
         fn size_allocate(&self, widget: &Self::Type, width: i32, height: i32, baseline: i32) {
             self.parent_size_allocate(widget, width, height, baseline);
             self.layout_manager
@@ -819,6 +849,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         }
 
         self_.display_size.replace(size);
+        self.queue_resize();
     }
 
     fn define_cursor(&self, cursor: Option<gdk::Cursor>) {
