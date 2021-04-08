@@ -135,6 +135,12 @@ mod imp {
                 self_.scroll(scroll);
             }));
 
+            obj.connect_resize_request(clone!(@weak obj => move |_, width, height| {
+                let self_ = Self::from_instance(&obj);
+                let status = self_.connection.set_size(width, height);
+                log::debug!("resize-request: {:?} -> {:?}", (width, height), status);
+            }));
+
             self.connection.connect_vnc_auth_choose_type(|conn, va| {
                 use gvnc::ConnectionAuth::*;
                 log::debug!("auth-choose-type: {:?}", va);

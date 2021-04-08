@@ -4,6 +4,7 @@ use glib::{
     signal::SignalHandlerId,
     subclass::prelude::*,
     translate::{FromGlibPtrBorrow, ToGlib},
+    SourceId,
 };
 use gtk::{gdk, glib, graphene, prelude::*, subclass::prelude::GLAreaImpl};
 use std::cell::Cell;
@@ -58,6 +59,7 @@ pub mod imp {
     pub struct Display {
         // The remote display size, ex: 1024x768
         pub display_size: Cell<Option<(u32, u32)>>,
+        pub resize_timeout_id: Cell<Option<SourceId>>,
         // The currently defined cursor
         pub cursor: RefCell<Option<gdk::Cursor>>,
         pub mouse_absolute: Cell<bool>,
@@ -174,6 +176,12 @@ pub mod imp {
                         <()>::static_type().into(),
                     )
                     .build(),
+                    Signal::builder(
+                        "resize-request",
+                        &[u32::static_type().into(), u32::static_type().into()],
+                        <()>::static_type().into(),
+                    )
+                    .build(),
                 ]
             });
             SIGNALS.as_ref()
@@ -269,6 +277,23 @@ pub mod imp {
                 }
                 glib::signal::Inhibit(false)
             }));
+        }
+
+        fn size_allocate(&self, widget: &Self::Type, width: i32, height: i32, baseline: i32) {
+            self.parent_size_allocate(widget, width, height, baseline);
+
+            if let Some(timeout_id) = self.resize_timeout_id.take() {
+                glib::source_remove(timeout_id);
+            }
+            self.resize_timeout_id.set(Some(glib::timeout_add_local(
+                std::time::Duration::from_millis(500),
+                clone!(@weak widget => @default-return glib::Continue(false), move || {
+                    let self_ = Self::from_instance(&widget);
+                    widget.emit_by_name("resize-request", &[&(width as u32), &(height as u32)]).unwrap();
+                    self_.resize_timeout_id.set(None);
+                    glib::Continue(false)
+                }),
+            )));
         }
 
         fn snapshot(&self, widget: &Self::Type, snapshot: &gtk::Snapshot) {
@@ -728,6 +753,8 @@ pub trait DisplayExt: 'static {
     fn connect_scroll_discrete<F: Fn(&Self, Scroll) + 'static>(&self, f: F) -> SignalHandlerId;
 
     fn connect_property_grabbed_notify<F: Fn(&Self) + 'static>(&self, f: F) -> SignalHandlerId;
+
+    fn connect_resize_request<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId;
 }
 
 impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
@@ -1038,6 +1065,32 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
                 Some(std::mem::transmute::<_, unsafe extern "C" fn()>(
                     notify_trampoline::<Self, F> as *const (),
                 )),
+                Box::into_raw(f),
+            )
+        }
+    }
+    fn connect_resize_request<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId {
+        unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, u32, u32) + 'static>(
+            this: *mut imp::RdwDisplay,
+            width: u32,
+            height: u32,
+            f: glib::ffi::gpointer,
+        ) where
+            P: IsA<Display>,
+        {
+            let f = &*(f as *const F);
+            f(
+                &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
+                width,
+                height,
+            )
+        }
+        unsafe {
+            let f: Box<F> = Box::new(f);
+            glib::signal::connect_raw(
+                self.as_ptr() as *mut glib::gobject_ffi::GObject,
+                b"resize-request\0".as_ptr() as *const _,
+                Some(std::mem::transmute(connect_trampoline::<Self, F> as usize)),
                 Box::into_raw(f),
             )
         }
