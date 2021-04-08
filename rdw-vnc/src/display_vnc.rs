@@ -77,6 +77,8 @@ mod imp {
         fn constructed(&self, obj: &Self::Type) {
             self.parent_constructed(obj);
 
+            obj.set_mouse_absolute(true);
+
             obj.connect_key_press(clone!(@weak obj => move |_, keyval, keycode| {
                 let self_ = Self::from_instance(&obj);
                 log::debug!("key-press: {:?}", (keyval, keycode));

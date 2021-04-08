@@ -84,8 +84,8 @@ fn main() {
             .unwrap();
         display.connect_property_grabbed_notify(clone!(@weak window => move |d| {
             let mut title = "rdw-vnc example".to_string();
-            if !d.get_grabbed().is_empty() {
-                title = format!("{} - grabbed {:?}", title, d.get_grabbed())
+            if !d.grabbed().is_empty() {
+                title = format!("{} - grabbed {:?}", title, d.grabbed())
             }
             window.set_title(Some(title.as_str()));
         }));

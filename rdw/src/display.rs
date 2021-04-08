@@ -394,6 +394,40 @@ pub mod imp {
             Ok(())
         }
 
+        fn ungrab_keyboard(&self, ec: &gtk::EventControllerKey) {
+            let display = self.get_instance();
+
+            if self.grabbed.get().contains(Grab::KEYBOARD) {
+                //display.remove_controller(ec); here crashes badly
+                glib::idle_add_local(clone!(@weak ec, @weak display => @default-panic, move || {
+                    let self_ = Self::from_instance(&display);
+                    if let Some(widget) = ec.get_widget() {
+                        widget.remove_controller(&ec);
+                    }
+                    if let Some(toplevel) = self_.get_toplevel() {
+                        // will also notify the grab change
+                        toplevel.restore_system_shortcuts();
+                    }
+                    glib::Continue(false)
+                }));
+            }
+        }
+
+        pub(crate) fn ungrab_mouse(&self) {
+            let display = self.get_instance();
+
+            if self.grabbed.get().contains(Grab::MOUSE) {
+                if let Some(lock) = self.wl_lock_pointer.take() {
+                    lock.destroy();
+                }
+                if let Some(rel_pointer) = self.wl_rel_pointer.take() {
+                    rel_pointer.destroy();
+                }
+                self.grabbed.set(self.grabbed.get() - Grab::MOUSE);
+                display.notify("grabbed");
+            }
+        }
+
         fn key_pressed(&self, ec: &gtk::EventControllerKey, keyval: gdk::keys::Key, keycode: u32) {
             let display = self.get_instance();
 
@@ -402,32 +436,8 @@ pub mod imp {
                     if self.grabbed.get().is_empty() {
                         self.try_grab();
                     } else {
-                        if self.grabbed.get().contains(Grab::KEYBOARD) {
-                            //display.remove_controller(ec); here crashes badly
-                            glib::idle_add_local(
-                                clone!(@weak ec, @weak display => @default-panic, move || {
-                                    let self_ = Self::from_instance(&display);
-                                    if let Some(widget) = ec.get_widget() {
-                                        widget.remove_controller(&ec);
-                                    }
-                                    if let Some(toplevel) = self_.get_toplevel() {
-                                        // will also notify the grab change
-                                        toplevel.restore_system_shortcuts();
-                                    }
-                                    glib::Continue(false)
-                                }),
-                            );
-                        }
-                        if self.grabbed.get().contains(Grab::MOUSE) {
-                            if let Some(lock) = self.wl_lock_pointer.take() {
-                                lock.destroy();
-                            }
-                            if let Some(rel_pointer) = self.wl_rel_pointer.take() {
-                                rel_pointer.destroy();
-                            }
-                            self.grabbed.set(self.grabbed.get() - Grab::MOUSE);
-                            display.notify("grabbed");
-                        }
+                        self.ungrab_keyboard(ec);
+                        self.ungrab_mouse();
                     }
                     return;
                 }
@@ -537,11 +547,14 @@ pub mod imp {
         }
 
         fn try_grab_mouse(&self) -> bool {
-            if self.grabbed.get().contains(Grab::MOUSE) {
+            let obj = self.get_instance();
+            if obj.mouse_absolute() {
+                return false;
+            }
+            if obj.grabbed().contains(Grab::MOUSE) {
                 return false;
             }
 
-            let obj = self.get_instance();
             let default_seat = obj.get_display().get_default_seat();
 
             for device in default_seat.get_devices(gdk::SeatCapabilities::POINTER) {
@@ -553,7 +566,7 @@ pub mod imp {
 
         fn try_grab(&self) {
             let display = self.get_instance();
-            let mut grabbed = self.grabbed.get();
+            let mut grabbed = display.grabbed();
             if self.try_grab_keyboard() {
                 grabbed |= Grab::KEYBOARD;
             }
@@ -696,7 +709,7 @@ pub trait DisplayExt: 'static {
 
     fn set_cursor_position(&self, pos: Option<(u32, u32)>);
 
-    fn get_grabbed(&self) -> Grab;
+    fn grabbed(&self) -> Grab;
 
     fn update_area(&self, x: i32, y: i32, w: i32, h: i32, stride: i32, data: &[u8]);
 
@@ -770,6 +783,10 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
         // Safety: safe because IsA<Display>
         let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
 
+        if absolute {
+            self_.ungrab_mouse();
+        }
+
         self_.mouse_absolute.set(absolute);
     }
 
@@ -785,7 +802,7 @@ impl<O: IsA<Display> + IsA<gtk::GLArea> + IsA<gtk::Widget>> DisplayExt for O {
         self_.cursor_position.set(pos);
     }
 
-    fn get_grabbed(&self) -> Grab {
+    fn grabbed(&self) -> Grab {
         // Safety: safe because IsA<Display>
         let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
 
