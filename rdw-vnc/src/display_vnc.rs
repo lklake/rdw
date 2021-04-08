@@ -250,8 +250,6 @@ mod imp {
 
     impl WidgetImpl for DisplayVnc {}
 
-    impl GLAreaImpl for DisplayVnc {}
-
     impl rdw::DisplayImpl for DisplayVnc {}
 
     impl DisplayVnc {
@@ -394,7 +392,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct DisplayVnc(ObjectSubclass<imp::DisplayVnc>) @extends rdw::Display, gtk::GLArea, gtk::Widget;
+    pub struct DisplayVnc(ObjectSubclass<imp::DisplayVnc>) @extends rdw::Display, gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl DisplayVnc {

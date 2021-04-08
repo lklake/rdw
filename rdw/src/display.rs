@@ -767,6 +767,8 @@ pub trait DisplayExt: 'static {
 
     fn update_area(&self, x: i32, y: i32, w: i32, h: i32, stride: i32, data: &[u8]);
 
+    fn set_alternative_text(&self, alt_text: &str);
+
     fn connect_key_press<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId;
 
     fn connect_key_release<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId;
@@ -786,7 +788,7 @@ pub trait DisplayExt: 'static {
     fn connect_resize_request<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId;
 }
 
-impl<O: IsA<Display> + IsA<gtk::Widget>> DisplayExt for O {
+impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O {
     fn display_size(&self) -> Option<(u32, u32)> {
         // Safety: safe because IsA<Display>
         let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
@@ -890,6 +892,10 @@ impl<O: IsA<Display> + IsA<gtk::Widget>> DisplayExt for O {
         }
 
         self_.gl_area().queue_render();
+    }
+
+    fn set_alternative_text(&self, alt_text: &str) {
+        self.update_property(&[(gtk::AccessibleProperty::Description, &alt_text)]);
     }
 
     fn connect_key_press<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId {
@@ -1143,5 +1149,5 @@ unsafe impl<T: DisplayImpl> IsSubclassable<T> for Display {
 }
 
 glib::wrapper! {
-    pub struct Display(ObjectSubclass<imp::Display>) @extends gtk::Widget;
+    pub struct Display(ObjectSubclass<imp::Display>) @extends gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
