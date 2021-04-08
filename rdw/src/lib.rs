@@ -8,8 +8,8 @@ mod util;
 pub use display::*;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy, GEnum)]
-#[repr(u32)]
 #[genum(type_name = "RdwScroll")]
+#[repr(C)]
 pub enum Scroll {
     Up,
     Down,
