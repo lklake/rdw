@@ -57,32 +57,32 @@ pub mod imp {
 
     #[derive(Default)]
     pub struct Display {
-        pub gl_area: OnceCell<gtk::GLArea>,
+        pub(crate) gl_area: OnceCell<gtk::GLArea>,
+
         // The remote display size, ex: 1024x768
-        pub display_size: Cell<Option<(u32, u32)>>,
-        pub resize_timeout_id: Cell<Option<SourceId>>,
+        pub(crate) display_size: Cell<Option<(u32, u32)>>,
+        pub(crate) resize_timeout_id: Cell<Option<SourceId>>,
         // The currently defined cursor
-        pub cursor: RefCell<Option<gdk::Cursor>>,
-        pub mouse_absolute: Cell<bool>,
+        pub(crate) cursor: RefCell<Option<gdk::Cursor>>,
+        pub(crate) mouse_absolute: Cell<bool>,
         // position of cursor when drawn by client
-        pub cursor_position: Cell<Option<(u32, u32)>>,
+        pub(crate) cursor_position: Cell<Option<(u32, u32)>>,
 
         // the shortcut to ungrab key/mouse (to be configurable and extended with ctrl-alt)
-        pub grab_shortcut: OnceCell<gtk::ShortcutTrigger>,
-        pub grabbed: Cell<Grab>,
-        pub shortcuts_inhibited_id: Cell<Option<SignalHandlerId>>,
+        pub(crate) grab_shortcut: OnceCell<gtk::ShortcutTrigger>,
+        pub(crate) grabbed: Cell<Grab>,
+        pub(crate) shortcuts_inhibited_id: Cell<Option<SignalHandlerId>>,
 
-        pub texture_id: Cell<GLuint>,
-        pub texture_blit_vao: Cell<GLuint>,
-        pub texture_blit_prog: Cell<GLuint>,
-        pub texture_blit_flip_prog: Cell<GLuint>,
+        pub(crate) texture_id: Cell<GLuint>,
+        pub(crate) texture_blit_vao: Cell<GLuint>,
+        pub(crate) texture_blit_prog: Cell<GLuint>,
+        pub(crate) texture_blit_flip_prog: Cell<GLuint>,
 
-        pub wl_source: Cell<Option<glib::SourceId>>,
-        pub wl_event_queue: OnceCell<wayland_client::EventQueue>,
-        pub wl_rel_manager: OnceCell<wayland_client::Main<ZwpRelativePointerManagerV1>>,
-        pub wl_rel_pointer: RefCell<Option<wayland_client::Main<ZwpRelativePointerV1>>>,
-        pub wl_pointer_constraints: OnceCell<wayland_client::Main<ZwpPointerConstraintsV1>>,
-        pub wl_lock_pointer: RefCell<Option<wayland_client::Main<ZwpLockedPointerV1>>>,
+        pub(crate) wl_source: Cell<Option<glib::SourceId>>,
+        pub(crate) wl_rel_manager: OnceCell<wayland_client::Main<ZwpRelativePointerManagerV1>>,
+        pub(crate) wl_rel_pointer: RefCell<Option<wayland_client::Main<ZwpRelativePointerV1>>>,
+        pub(crate) wl_pointer_constraints: OnceCell<wayland_client::Main<ZwpPointerConstraintsV1>>,
+        pub(crate) wl_lock_pointer: RefCell<Option<wayland_client::Main<ZwpLockedPointerV1>>>,
     }
 
     #[glib::object_subclass]
