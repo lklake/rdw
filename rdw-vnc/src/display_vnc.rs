@@ -400,10 +400,10 @@ impl DisplayVnc {
         glib::Object::new::<Self>(&[]).unwrap()
     }
 
-    pub fn connection(&self) -> gvnc::Connection {
+    pub fn connection(&self) -> &gvnc::Connection {
         let self_ = imp::DisplayVnc::from_instance(self);
 
-        self_.connection.clone()
+        &self_.connection
     }
 }
 

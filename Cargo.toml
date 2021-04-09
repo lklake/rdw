@@ -3,6 +3,7 @@ members = [
     "demo",
     "keycodemap",
     "rdw",
+    "rdw-spice",
     "rdw-vnc",
     "xtask",
 ]
