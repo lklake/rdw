@@ -3,13 +3,14 @@ use std::{cell::RefCell, sync::Arc};
 use gio::ApplicationFlags;
 use glib::{clone, translate::ToGlib};
 use gtk::{gio, glib, prelude::*};
+use rdw_vnc::{gvnc, rdw};
 use rdw::DisplayExt;
 
 fn main() {
     env_logger::init();
 
     let app = gtk::Application::new(
-        Some("org.gnome.rdw-vnc.basic"),
+        Some("org.gnome.rdw.demo"),
         ApplicationFlags::NON_UNIQUE | ApplicationFlags::HANDLES_COMMAND_LINE,
     )
     .expect("Initialization failed...");
@@ -26,7 +27,7 @@ fn main() {
         glib::Char(0),
         glib::OptionFlags::NONE,
         glib::OptionArg::None,
-        "Enable gtk-vnc debugging",
+        "Enable debugging",
         None,
     );
     app.add_main_option(
