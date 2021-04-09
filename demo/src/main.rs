@@ -5,7 +5,24 @@ use gio::ApplicationFlags;
 use glib::{clone, translate::ToGlib};
 use gtk::{gio, glib, prelude::*};
 use rdw::DisplayExt;
+use rdw_spice::spice::{self, ChannelExt};
 use rdw_vnc::{gvnc, rdw};
+
+fn show_error(app: gtk::Application, msg: &str) {
+    let mut dialog = gtk::MessageDialogBuilder::new()
+        .modal(true)
+        .buttons(gtk::ButtonsType::Ok)
+        .text(msg);
+    if let Some(parent) = app.get_active_window() {
+        dialog = dialog.transient_for(&parent);
+    }
+    let dialog = dialog.build();
+    let run_dialog = async move {
+        dialog.run_future().await;
+        app.quit();
+    };
+    glib::MainContext::default().spawn_local(run_dialog);
+}
 
 fn vnc_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
     let has_error = Arc::new(AtomicBool::new(false));
@@ -24,19 +41,7 @@ fn vnc_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
     vnc.connection()
         .connect_vnc_error(clone!(@weak app => move |_, msg| {
             has_error2.store(true, Ordering::Relaxed);
-            let mut dialog = gtk::MessageDialogBuilder::new()
-                .modal(true)
-                .buttons(gtk::ButtonsType::Ok)
-                .text(msg);
-            if let Some(parent) = app.get_active_window() {
-                dialog = dialog.transient_for(&parent);
-            }
-            let dialog = dialog.build();
-            let run_dialog = async move {
-                dialog.run_future().await;
-                app.quit();
-            };
-            glib::MainContext::default().spawn_local(run_dialog);
+            show_error(app.clone(), msg);
         }));
 
     vnc.connection()
@@ -100,6 +105,33 @@ fn vnc_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
     vnc.upcast::<_>()
 }
 
+fn spice_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
+    let spice = rdw_spice::DisplaySpice::new();
+    let session = spice.session();
+
+    session.set_property_uri(Some(&uri.to_string()));
+
+    session.connect_channel_new(clone!(@weak app => move |_, channel| {
+        if let Ok(main) = channel.clone().downcast::<spice::MainChannel>() {
+            main.connect_channel_event(clone!(@weak app => move |channel, event| {
+                use spice::ChannelEvent::*;
+                if event == ErrorConnect {
+                    if let Some(err) = channel.get_error() {
+                        show_error(app.clone(), &err.to_string());
+                    }
+                }
+            }));
+        }
+    }));
+
+    session.connect_disconnected(clone!(@weak app => move |_| {
+        app.quit();
+    }));
+
+    session.connect();
+    spice.upcast::<_>()
+}
+
 fn make_display(app: &gtk::Application, mut uri: String) -> rdw::Display {
     if glib::Uri::peek_scheme(&uri).is_none() {
         uri = format!("vnc://{}", uri);
@@ -109,6 +141,7 @@ fn make_display(app: &gtk::Application, mut uri: String) -> rdw::Display {
 
     match uri.get_scheme().as_str() {
         "vnc" => vnc_display(app, uri),
+        spice if spice.starts_with("spice") => spice_display(app, uri),
         scheme => panic!("Unhandled scheme {}", scheme),
     }
 }
