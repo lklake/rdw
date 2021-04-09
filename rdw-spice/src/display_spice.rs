@@ -1,5 +1,8 @@
-use glib::{clone, subclass::prelude::*, translate::*};
+use std::convert::TryFrom;
+
+use glib::{clone, subclass::prelude::*};
 use gtk::{glib, prelude::*};
+use spice::ChannelExt;
 use spice_client_glib as spice;
 
 mod imp {
@@ -32,17 +35,10 @@ mod imp {
         type Type = DisplaySpice;
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Default)]
     pub struct DisplaySpice {
         pub(crate) session: spice::Session,
-    }
-
-    impl Default for DisplaySpice {
-        fn default() -> Self {
-            Self {
-                session: spice::Session::new(),
-            }
-        }
+        pub(crate) main: glib::WeakRef<spice::MainChannel>,
     }
 
     #[glib::object_subclass]
@@ -54,7 +50,53 @@ mod imp {
         type Instance = RdwDisplaySpice;
     }
 
-    impl ObjectImpl for DisplaySpice {}
+    impl ObjectImpl for DisplaySpice {
+        fn constructed(&self, obj: &Self::Type) {
+            self.parent_constructed(obj);
+            let session = &self.session;
+
+            session.connect_channel_new(clone!(@weak obj => move |_session, channel| {
+                use spice::ChannelType::*;
+                let self_ = Self::from_instance(&obj);
+
+                let type_ = match spice::ChannelType::try_from(channel.get_property_channel_type()) {
+                    Ok(t) => t,
+                    _ => return,
+                };
+
+                match type_ {
+                    Main => {
+                        let main = channel.clone().downcast::<spice::MainChannel>().unwrap();
+                        main.connect_main_mouse_update(clone!(@weak obj => move |main| {
+                            let self_ = Self::from_instance(&obj);
+                            dbg!((self_, main.get_property_mouse_mode()));
+                        }));
+                        self_.main.set(Some(&main));
+                    },
+                    Inputs => {
+                        let input = channel.clone().downcast::<spice::InputsChannel>().unwrap();
+                        input.connect_inputs_modifiers(clone!(@weak obj => move |input| {
+                            let modifiers = input.get_property_key_modifiers();
+                            log::debug!("inputs-modifiers: {}", modifiers)
+                        }));
+                        spice::ChannelExt::connect(&input);
+                    }
+                    Display => {
+                        let dpy = channel.clone().downcast::<spice::DisplayChannel>().unwrap();
+                        dpy.connect_property_gl_scanout_notify(|dpy| {
+                            log::debug!("notify::gl-scanout: {:?}", dpy.get_gl_scanout());
+                            dbg!(dpy.get_gl_scanout().unwrap().fd());
+                        });
+                        dpy.connect_gl_draw(|_dpy, x, y, w, h| {
+                            log::debug!("gl-draw: {:?}", (x, y, w, h));
+                        });
+                        spice::ChannelExt::connect(&dpy);
+                    },
+                    _ => return,
+                }
+            }));
+        }
+    }
 
     impl WidgetImpl for DisplaySpice {}
 
