@@ -1,6 +1,6 @@
-use spice_client_glib as spice;
 use glib::{clone, subclass::prelude::*, translate::*};
 use gtk::{glib, prelude::*};
+use spice_client_glib as spice;
 
 mod imp {
     use super::*;
