@@ -53,16 +53,14 @@ fn codegen() -> Result<(), DynError> {
         "win32",
         "x11",
     ];
-    let to = [
-        "qnum",
-        "xtkbd",
-    ];
+    let to = ["qnum", "xtkbd"];
     for from in &from {
         for to in &to {
             let varname = format!("keymap_{}2{}", from, to);
-            let out =
-                cmd!("{keymap_gen} code-map --lang rust --varname {varname} {keymaps_csv} {from} {to}")
-                    .read()?;
+            let out = cmd!(
+                "{keymap_gen} code-map --lang rust --varname {varname} {keymaps_csv} {from} {to}"
+            )
+            .read()?;
             write_file(keycodemap_src.join(format!("{}.rs", varname)), out)?;
         }
     }

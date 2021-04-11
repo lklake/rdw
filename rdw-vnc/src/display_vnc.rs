@@ -98,7 +98,7 @@ mod imp {
                 if !obj.mouse_absolute() {
                     return;
                 }
-                let button_mask = self_.last_button_mask.get().unwrap_or(0);
+                let button_mask = self_.last_button_mask();
                 if let Err(e) = self_.connection.pointer_event(button_mask, x as _, y as _) {
                     log::warn!("Failed to send pointer event: {}", e);
                 }
@@ -110,7 +110,7 @@ mod imp {
                 if obj.mouse_absolute() {
                     return;
                 }
-                let button_mask = self_.last_button_mask.get().unwrap_or(0);
+                let button_mask = self_.last_button_mask();
                 let (dx, dy) = (dx as i32 + 0x7fff, dy as i32 + 0x7fff);
                 if let Err(e) = self_.connection.pointer_event(button_mask, dx as _, dy as _) {
                     log::warn!("Failed to send pointer event: {}", e);
@@ -253,6 +253,10 @@ mod imp {
     impl rdw::DisplayImpl for DisplayVnc {}
 
     impl DisplayVnc {
+        fn last_button_mask(&self) -> u8 {
+            self.last_button_mask.get().unwrap_or(0)
+        }
+
         fn key_event(&self, press: bool, keyval: u32, keycode: u32) {
             // TODO: get the correct keymap according to gdk display type
             if let Some(qnum) = KEYMAP_XORGEVDEV2QNUM.get(keycode as usize) {
@@ -273,7 +277,7 @@ mod imp {
             };
             let button = 1 << (button - 1);
 
-            let mut button_mask = self.last_button_mask.get().unwrap_or(0);
+            let mut button_mask = self.last_button_mask();
             if press {
                 button_mask |= button;
             } else {

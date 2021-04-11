@@ -41,7 +41,7 @@ fn vnc_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
     vnc.connection()
         .connect_vnc_error(clone!(@weak app => move |_, msg| {
             has_error2.store(true, Ordering::Relaxed);
-            show_error(app.clone(), msg);
+            show_error(app, msg);
         }));
 
     vnc.connection()
@@ -117,7 +117,7 @@ fn spice_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
                 use spice::ChannelEvent::*;
                 if event == ErrorConnect {
                     if let Some(err) = channel.get_error() {
-                        show_error(app.clone(), &err.to_string());
+                        show_error(app, &err.to_string());
                     }
                 }
             }));

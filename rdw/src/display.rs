@@ -61,7 +61,7 @@ pub mod imp {
         pub(crate) layout_manager: OnceCell<gtk::BinLayout>,
 
         // The remote display size, ex: 1024x768
-        pub(crate) display_size: Cell<Option<(u32, u32)>>,
+        pub(crate) display_size: Cell<Option<(usize, usize)>>,
         pub(crate) resize_timeout_id: Cell<Option<SourceId>>,
         // The currently defined cursor
         pub(crate) cursor: RefCell<Option<gdk::Cursor>>,
@@ -781,9 +781,9 @@ impl Display {
 pub const NONE_DISPLAY: Option<&Display> = None;
 
 pub trait DisplayExt: 'static {
-    fn display_size(&self) -> Option<(u32, u32)>;
+    fn display_size(&self) -> Option<(usize, usize)>;
 
-    fn set_display_size(&self, size: Option<(u32, u32)>);
+    fn set_display_size(&self, size: Option<(usize, usize)>);
 
     fn define_cursor(&self, cursor: Option<gdk::Cursor>);
 
@@ -819,18 +819,22 @@ pub trait DisplayExt: 'static {
 }
 
 impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O {
-    fn display_size(&self) -> Option<(u32, u32)> {
+    fn display_size(&self) -> Option<(usize, usize)> {
         // Safety: safe because IsA<Display>
         let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
 
         self_.display_size.get()
     }
 
-    fn set_display_size(&self, size: Option<(u32, u32)>) {
+    fn set_display_size(&self, size: Option<(usize, usize)>) {
         // Safety: safe because IsA<Display>
         let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
-        self_.gl_area().make_current();
 
+        if self.display_size() == size {
+            return;
+        }
+
+        self_.gl_area().make_current();
         if let Some((width, height)) = size {
             unsafe {
                 gl::BindTexture(gl::TEXTURE_2D, self_.texture_id());

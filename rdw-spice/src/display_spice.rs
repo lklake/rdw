@@ -1,13 +1,15 @@
 use std::convert::TryFrom;
 
 use glib::{clone, subclass::prelude::*};
-use gtk::{gio, glib, prelude::*};
-use spice::ChannelExt;
-use spice_client_glib as spice;
+use gtk::{gdk, gio, glib, prelude::*};
 use keycodemap::KEYMAP_XORGEVDEV2XTKBD;
 use rdw::DisplayExt;
+use spice::ChannelExt;
+use spice_client_glib as spice;
 
 mod imp {
+    use std::cell::Cell;
+
     use super::*;
     use gtk::subclass::prelude::*;
 
@@ -40,8 +42,12 @@ mod imp {
     #[derive(Debug, Default)]
     pub struct DisplaySpice {
         pub(crate) session: spice::Session,
+        pub(crate) monitor_config: Cell<Option<spice::DisplayMonitorConfig>>,
         pub(crate) main: glib::WeakRef<spice::MainChannel>,
         pub(crate) input: glib::WeakRef<spice::InputsChannel>,
+        pub(crate) display: glib::WeakRef<spice::DisplayChannel>,
+        pub(crate) last_button_state: Cell<Option<i32>>,
+        pub(crate) nth_monitor: usize,
     }
 
     #[glib::object_subclass]
@@ -56,7 +62,8 @@ mod imp {
     impl ObjectImpl for DisplaySpice {
         fn constructed(&self, obj: &Self::Type) {
             self.parent_constructed(obj);
-            let session = &self.session;
+
+            obj.set_mouse_absolute(true);
 
             obj.connect_key_press(clone!(@weak obj => move |_, keyval, keycode| {
                 let self_ = Self::from_instance(&obj);
@@ -80,6 +87,42 @@ mod imp {
                 }
             }));
 
+            obj.connect_motion(clone!(@weak obj => move |_, x, y| {
+                let self_ = Self::from_instance(&obj);
+                log::debug!("motion: {:?}", (x, y));
+                if let Some(input) = self_.input.upgrade() {
+                    input.position(x as _, y as _, self_.nth_monitor as _, self_.last_button_state());
+                }
+            }));
+
+            obj.connect_mouse_press(clone!(@weak obj => move |_, button| {
+                let self_ = Self::from_instance(&obj);
+                log::debug!("mouse-press: {:?}", button);
+                self_.mouse_click(true, button);
+            }));
+
+            obj.connect_mouse_release(clone!(@weak obj => move |_, button| {
+                let self_ = Self::from_instance(&obj);
+                log::debug!("mouse-release: {:?}", button);
+                self_.mouse_click(false, button);
+            }));
+
+            obj.connect_scroll_discrete(clone!(@weak obj => move |_, scroll| {
+                let self_ = Self::from_instance(&obj);
+                log::debug!("scroll-discrete: {:?}", scroll);
+                self_.scroll(scroll);
+            }));
+
+            obj.connect_resize_request(clone!(@weak obj => move |_, width, height| {
+                let self_ = Self::from_instance(&obj);
+                log::debug!("resize-request: {:?}", (width, height));
+                if let Some(main) = self_.main.upgrade() {
+                    main.update_display(self_.nth_monitor as _, 0, 0, width as _, height as _, true);
+                }
+            }));
+
+            let session = &self.session;
+
             session.connect_channel_new(clone!(@weak obj => move |_session, channel| {
                 use spice::ChannelType::*;
                 let self_ = Self::from_instance(&obj);
@@ -92,76 +135,97 @@ mod imp {
                 match type_ {
                     Main => {
                         let main = channel.clone().downcast::<spice::MainChannel>().unwrap();
-                        main.connect_main_mouse_update(clone!(@weak obj => move |main| {
-                            log::debug!("mouse-update: {}", main.get_property_mouse_mode());
-                        }));
                         self_.main.set(Some(&main));
+
+                        main.connect_main_mouse_update(clone!(@weak obj => move |main| {
+                            let mode = spice::MouseMode::from_bits_truncate(main.get_property_mouse_mode());
+                            log::debug!("mouse-update: {:?}", mode);
+                            obj.set_mouse_absolute(mode.contains(spice::MouseMode::CLIENT));
+                        }));
                     },
                     Inputs => {
                         let input = channel.clone().downcast::<spice::InputsChannel>().unwrap();
+                        self_.input.set(Some(&input));
+
                         input.connect_inputs_modifiers(clone!(@weak obj => move |input| {
                             let modifiers = input.get_property_key_modifiers();
                             log::debug!("inputs-modifiers: {}", modifiers);
                             input.connect_channel_event(clone!(@weak obj => move |input, event| {
-                                if event == spice::ChannelEvent::Opened {
-                                    if input.get_property_socket().unwrap().get_family() == gio::SocketFamily::Unix {
-                                        log::debug!("on unix socket");
-                                    }
+                                if event == spice::ChannelEvent::Opened && input.get_property_socket().unwrap().get_family() == gio::SocketFamily::Unix {
+                                    log::debug!("on unix socket");
                                 }
                             }));
                         }));
-                        self_.input.set(Some(&input));
                         spice::ChannelExt::connect(&input);
                     }
                     Display => {
                         let dpy = channel.clone().downcast::<spice::DisplayChannel>().unwrap();
-                        dpy.connect_display_primary_create(|dpy| {
-                            let mut primary = spice::DisplayPrimary::new();
-                            if !dpy.get_primary(0, &mut primary) {
-                                log::warn!("primary-create: failed to get primary");
-                                return;
-                            }
-                            log::debug!("primary-create: {:?}", primary);
-                        });
+                        self_.display.set(Some(&dpy));
+
+                        dpy.connect_display_primary_create(clone!(@weak obj => move |_| {
+                            log::debug!("primary-create");
+                        }));
+
                         dpy.connect_display_primary_destroy(|_| {
                             log::debug!("primary-destroy");
                         });
+
                         dpy.connect_display_mark(|_, mark| {
                             log::debug!("primary-mark: {}", mark);
                         });
-                        dpy.connect_display_invalidate(|_, x, y, w, h| {
+
+                        dpy.connect_display_invalidate(clone!(@weak obj => move |_, x, y, w, h| {
+                            let self_ = Self::from_instance(&obj);
                             log::debug!("primary-invalidate: {:?}", (x, y, w, h));
-                        });
+                            self_.invalidate(x as _, y as _, w as _, h as _);
+                        }));
+
                         dpy.connect_property_gl_scanout_notify(|dpy| {
                             let scanout = dpy.get_gl_scanout();
                             log::debug!("notify::gl-scanout: {:?}", scanout);
                         });
-                        dpy.connect_property_monitors_notify(|_dpy| {
-                            //let monitors = dpy.get_monitors();
-                            log::debug!("notify::monitors: todo");
-                        });
+
+                        dpy.connect_property_monitors_notify(clone!(@weak obj => move |dpy| {
+                            let self_ = Self::from_instance(&obj);
+                            let monitors = dpy.get_property_monitors();
+                            log::debug!("notify::monitors: {:?}", monitors);
+                            let monitor_config = monitors.and_then(|m| m.get(self_.nth_monitor).copied());
+                            if let Some((0, 0, w, h)) = monitor_config.map(|c| c.geometry()) {
+                                obj.set_display_size(Some((w, h)));
+                                if self_.primary().is_some() {
+                                    self_.invalidate(0, 0, w, h);
+                                }
+                            }
+                            self_.monitor_config.set(monitor_config);
+                        }));
+
                         dpy.connect_gl_draw(|_dpy, x, y, w, h| {
                             log::debug!("gl-draw: {:?}", (x, y, w, h));
                         });
+
                         spice::ChannelExt::connect(&dpy);
                     },
                     Cursor => {
                         let cursor = channel.clone().downcast::<spice::CursorChannel>().unwrap();
+
                         cursor.connect_cursor_move(|_cursor, x, y| {
                             log::debug!("cursor-move: {:?}", (x, y));
                         });
+
                         cursor.connect_cursor_reset(|_cursor| {
                             log::debug!("cursor-reset");
                         });
+
                         cursor.connect_cursor_hide(|_cursor| {
                             log::debug!("cursor-hide");
                         });
+
                         cursor.connect_property_cursor_notify(|cursor| {
                             let cursor = cursor.get_property_cursor();
                             log::debug!("cursor-notify: {:?}", cursor);
                         });
                     }
-                    _ => return,
+                    _ => {}
                 }
             }));
         }
@@ -170,6 +234,116 @@ mod imp {
     impl WidgetImpl for DisplaySpice {}
 
     impl rdw::DisplayImpl for DisplaySpice {}
+
+    impl DisplaySpice {
+        fn button_event(&self, press: bool, button: spice::MouseButton) {
+            assert_ne!(button, spice::MouseButton::Invalid);
+
+            let mut button_state = self.last_button_state();
+            let button = button as i32;
+            let button_mask = 1 << (button - 1);
+            if press {
+                button_state |= button_mask;
+            } else {
+                button_state &= !button_mask;
+            }
+            self.last_button_state.set(Some(button_state));
+
+            if let Some(input) = self.input.upgrade() {
+                if press {
+                    input.button_press(button, button_state);
+                } else {
+                    input.button_release(button, button_state);
+                }
+            }
+        }
+
+        fn mouse_click(&self, press: bool, button: u32) {
+            let button = match button {
+                gdk::BUTTON_PRIMARY => spice::MouseButton::Left,
+                gdk::BUTTON_MIDDLE => spice::MouseButton::Middle,
+                gdk::BUTTON_SECONDARY => spice::MouseButton::Right,
+                button => {
+                    log::warn!("Unhandled button event nth: {}", button);
+                    return;
+                }
+            };
+
+            self.button_event(press, button);
+        }
+
+        fn scroll(&self, scroll: rdw::Scroll) {
+            let n = match scroll {
+                rdw::Scroll::Up => spice::MouseButton::Up,
+                rdw::Scroll::Down => spice::MouseButton::Down,
+                other => {
+                    log::debug!("spice doesn't have scroll: {:?}", other);
+                    return;
+                }
+            };
+            self.button_event(true, n);
+            self.button_event(false, n);
+        }
+
+        fn last_button_state(&self) -> i32 {
+            self.last_button_state.get().unwrap_or(0)
+        }
+
+        fn primary(&self) -> Option<spice::DisplayPrimary> {
+            self.monitor_config.get().and_then(|c| {
+                self.display
+                    .upgrade()
+                    .and_then(|d| d.primary(c.surface_id()))
+            })
+        }
+
+        fn invalidate(&self, x: usize, y: usize, w: usize, h: usize) {
+            let obj = self.get_instance();
+
+            let (monitor_x, monitor_y, _w, _h) = match self.monitor_config.get() {
+                Some(config) => config.geometry(),
+                _ => return,
+            };
+
+            if (monitor_x, monitor_y) != (0, 0) {
+                log::warn!(
+                    "offset monitor geometry not yet supported: {:?}",
+                    (monitor_x, monitor_y)
+                );
+                return;
+            }
+
+            let primary = match self.primary() {
+                Some(primary) => primary,
+                _ => {
+                    log::warn!("no primary");
+                    return;
+                }
+            };
+
+            let fmt = primary.format().unwrap_or(spice::SurfaceFormat::Invalid);
+            match fmt {
+                spice::SurfaceFormat::_32XRGB => {
+                    let stride = primary.stride();
+                    let buf = primary.data();
+                    let start = x * 4 + y * stride;
+                    let end = (x + w) * 4 + (y + h - 1) * stride;
+
+                    obj.update_area(
+                        x as _,
+                        y as _,
+                        w as _,
+                        h as _,
+                        stride as _,
+                        &buf[start..end],
+                    );
+                }
+                _ => {
+                    log::debug!("format not supported: {:?}", fmt);
+                }
+            }
+        }
+    }
 }
 
 glib::wrapper! {
@@ -185,5 +359,11 @@ impl DisplaySpice {
         let self_ = imp::DisplaySpice::from_instance(self);
 
         &self_.session
+    }
+}
+
+impl Default for DisplaySpice {
+    fn default() -> Self {
+        Self::new()
     }
 }
