@@ -4,6 +4,8 @@ use glib::{clone, subclass::prelude::*};
 use gtk::{gio, glib, prelude::*};
 use spice::ChannelExt;
 use spice_client_glib as spice;
+use keycodemap::KEYMAP_XORGEVDEV2XTKBD;
+use rdw::DisplayExt;
 
 mod imp {
     use super::*;
@@ -39,6 +41,7 @@ mod imp {
     pub struct DisplaySpice {
         pub(crate) session: spice::Session,
         pub(crate) main: glib::WeakRef<spice::MainChannel>,
+        pub(crate) input: glib::WeakRef<spice::InputsChannel>,
     }
 
     #[glib::object_subclass]
@@ -54,6 +57,28 @@ mod imp {
         fn constructed(&self, obj: &Self::Type) {
             self.parent_constructed(obj);
             let session = &self.session;
+
+            obj.connect_key_press(clone!(@weak obj => move |_, keyval, keycode| {
+                let self_ = Self::from_instance(&obj);
+                log::debug!("key-press: {:?}", (keyval, keycode));
+                // TODO: get the correct keymap according to gdk display type
+                if let Some(xt) = KEYMAP_XORGEVDEV2XTKBD.get(keycode as usize) {
+                    if let Some(input) = self_.input.upgrade() {
+                        input.key_press(*xt as _);
+                    }
+                }
+            }));
+
+            obj.connect_key_release(clone!(@weak obj => move |_, keyval, keycode| {
+                let self_ = Self::from_instance(&obj);
+                log::debug!("key-release: {:?}", (keyval, keycode));
+                // TODO: get the correct keymap according to gdk display type
+                if let Some(xt) = KEYMAP_XORGEVDEV2XTKBD.get(keycode as usize) {
+                    if let Some(input) = self_.input.upgrade() {
+                        input.key_release(*xt as _);
+                    }
+                }
+            }));
 
             session.connect_channel_new(clone!(@weak obj => move |_session, channel| {
                 use spice::ChannelType::*;
@@ -85,6 +110,7 @@ mod imp {
                                 }
                             }));
                         }));
+                        self_.input.set(Some(&input));
                         spice::ChannelExt::connect(&input);
                     }
                     Display => {
