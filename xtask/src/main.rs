@@ -44,7 +44,7 @@ fn codegen() -> Result<(), DynError> {
     let keymaps_csv = keycodemapdb.join("data").join("keymaps.csv");
     let keymap_gen = keycodemapdb.join("tools").join("keymap-gen");
 
-    let keymaps = [
+    let from = [
         "xorgevdev",
         "xorgkbd",
         "xorgxquartz",
@@ -53,12 +53,18 @@ fn codegen() -> Result<(), DynError> {
         "win32",
         "x11",
     ];
-    for km in &keymaps {
-        let varname = format!("keymap_{}2qnum", km);
-        let out =
-            cmd!("{keymap_gen} code-map --lang rust --varname {varname} {keymaps_csv} {km} qnum")
-                .read()?;
-        write_file(keycodemap_src.join(format!("{}.rs", varname)), out)?;
+    let to = [
+        "qnum",
+        "xtkbd",
+    ];
+    for from in &from {
+        for to in &to {
+            let varname = format!("keymap_{}2{}", from, to);
+            let out =
+                cmd!("{keymap_gen} code-map --lang rust --varname {varname} {keymaps_csv} {from} {to}")
+                    .read()?;
+            write_file(keycodemap_src.join(format!("{}.rs", varname)), out)?;
+        }
     }
     Ok(())
 }
