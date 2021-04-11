@@ -152,8 +152,7 @@ fn main() {
     let app = gtk::Application::new(
         Some("org.gnome.rdw.demo"),
         ApplicationFlags::NON_UNIQUE | ApplicationFlags::HANDLES_COMMAND_LINE,
-    )
-    .expect("Initialization failed...");
+    );
     app.add_main_option(
         "version",
         glib::Char(0),
