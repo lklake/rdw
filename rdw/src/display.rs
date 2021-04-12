@@ -1,11 +1,5 @@
 use gl::types::*;
-use glib::{
-    clone,
-    signal::SignalHandlerId,
-    subclass::prelude::*,
-    translate::{FromGlibPtrBorrow, ToGlib},
-    SourceId,
-};
+use glib::{clone, signal::SignalHandlerId, subclass::prelude::*, translate::*, SourceId};
 use gtk::{gdk, glib, graphene, prelude::*, subclass::prelude::WidgetImpl};
 use std::cell::Cell;
 
@@ -19,7 +13,7 @@ use wayland_protocols::unstable::relative_pointer::v1::client::zwp_relative_poin
     Event as RelEvent, ZwpRelativePointerV1,
 };
 
-use crate::{egl, error::Error, util, Grab, Scroll};
+use crate::{egl, error::Error, util, DmabufScanout, Grab, Scroll};
 
 pub mod imp {
     use std::cell::RefCell;
@@ -78,6 +72,7 @@ pub mod imp {
         pub(crate) texture_blit_vao: Cell<GLuint>,
         pub(crate) texture_blit_prog: Cell<GLuint>,
         pub(crate) texture_blit_flip_prog: Cell<GLuint>,
+        pub(crate) dmabuf: Cell<Option<DmabufScanout>>,
 
         pub(crate) wl_source: Cell<Option<glib::SourceId>>,
         pub(crate) wl_rel_manager: OnceCell<wayland_client::Main<ZwpRelativePointerManagerV1>>,
@@ -778,6 +773,24 @@ pub mod imp {
                 .and_then(|s| s.downcast::<gdk_wl::WaylandSurface>().ok())
                 .map(|w| w.get_wl_surface())
         }
+
+        pub(crate) fn egl_display(&self) -> Option<egl::Display> {
+            let widget = self.get_instance();
+            let egl = egl::egl();
+
+            if let Ok(dpy) = widget.get_display().downcast::<gdk_wl::WaylandDisplay>() {
+                let wl_dpy = dpy.get_wl_display();
+                return egl.get_display(wl_dpy.as_ref().c_ptr() as _);
+            }
+
+            if let Ok(dpy) = widget.get_display().downcast::<gdk_x11::X11Display>() {
+                let _dpy =
+                    unsafe { gdk_x11::ffi::gdk_x11_display_get_xdisplay(dpy.to_glib_none().0) };
+                log::warn!("X11: unsupported display kind, todo");
+            };
+
+            None
+        }
     }
 }
 
@@ -829,6 +842,8 @@ pub trait DisplayExt: 'static {
     fn grabbed(&self) -> Grab;
 
     fn update_area(&self, x: i32, y: i32, w: i32, h: i32, stride: i32, data: &[u8]);
+
+    fn set_dmabuf_scanout(&self, s: DmabufScanout);
 
     fn set_alternative_text(&self, alt_text: &str);
 
@@ -958,6 +973,76 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         }
 
         self_.gl_area().queue_render();
+    }
+
+    fn set_dmabuf_scanout(&self, s: DmabufScanout) {
+        // Safety: safe because IsA<Display>
+        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
+        self_.gl_area().make_current();
+
+        let egl = egl::egl();
+        let egl_image_target = match egl::image_target_texture_2d_oes() {
+            Some(func) => func,
+            _ => {
+                log::warn!("ImageTargetTexture2DOES support missing");
+                return;
+            }
+        };
+
+        let egl_dpy = match self_.egl_display() {
+            Some(dpy) => dpy,
+            None => {
+                log::warn!("Unsupported display kind (or not egl)");
+                return;
+            }
+        };
+
+        let attribs = vec![
+            egl::WIDTH as usize,
+            s.width as usize,
+            egl::HEIGHT as usize,
+            s.height as usize,
+            egl::LINUX_DRM_FOURCC_EXT as usize,
+            s.fourcc as usize,
+            egl::DMA_BUF_PLANE0_FD_EXT as usize,
+            s.fd as usize,
+            egl::DMA_BUF_PLANE0_PITCH_EXT as usize,
+            s.stride as usize,
+            egl::DMA_BUF_PLANE0_OFFSET_EXT as usize,
+            0,
+            egl::DMA_BUF_PLANE0_MODIFIER_LO_EXT as usize,
+            (s.modifier & 0xffffffff) as usize,
+            egl::DMA_BUF_PLANE0_MODIFIER_HI_EXT as usize,
+            (s.modifier >> 32 & 0xffffffff) as usize,
+            egl::NONE as usize,
+        ];
+
+        let img = match egl.create_image(
+            egl_dpy,
+            egl::no_context(),
+            egl::LINUX_DMA_BUF_EXT,
+            egl::no_client_buffer(),
+            &attribs,
+        ) {
+            Ok(img) => img,
+            Err(e) => {
+                log::warn!("eglCreateImage() failed: {}", e);
+                return;
+            }
+        };
+
+        unsafe {
+            gl::BindTexture(gl::TEXTURE_2D, self_.texture_id());
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as _);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as _);
+            egl_image_target(gl::TEXTURE_2D, img.as_ptr() as gl::types::GLeglImageOES);
+        }
+
+        self_.dmabuf.set(Some(s));
+
+        if let Err(e) = egl.destroy_image(egl_dpy, img) {
+            log::warn!("eglDestroyImage() failed: {}", e);
+        }
     }
 
     fn set_alternative_text(&self, alt_text: &str) {

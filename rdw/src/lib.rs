@@ -6,6 +6,7 @@ mod error;
 mod util;
 
 pub use display::*;
+pub use egl::DmabufScanout;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy, GEnum)]
 #[genum(type_name = "RdwScroll")]

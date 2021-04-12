@@ -1,3 +1,6 @@
+use std::os::unix::prelude::RawFd;
+
+pub use khronos_egl::*;
 use once_cell::sync::OnceCell;
 
 type EglInstance =
@@ -10,4 +13,53 @@ pub(crate) fn egl() -> &'static EglInstance {
         khronos_egl::DynamicInstance::<khronos_egl::EGL1_5>::load_required_from(lib)
             .expect("unable to load libEGL.so")
     })
+}
+
+pub const LINUX_DMA_BUF_EXT: Enum = 0x3270;
+pub const LINUX_DRM_FOURCC_EXT: Int = 0x3271;
+pub const DMA_BUF_PLANE0_FD_EXT: Int = 0x3272;
+pub const DMA_BUF_PLANE0_OFFSET_EXT: Int = 0x3273;
+pub const DMA_BUF_PLANE0_PITCH_EXT: Int = 0x3274;
+pub const DMA_BUF_PLANE0_MODIFIER_LO_EXT: Int = 0x3443;
+pub const DMA_BUF_PLANE0_MODIFIER_HI_EXT: Int = 0x3444;
+
+// GLAPI void APIENTRY glEGLImageTargetTexture2DOES (GLenum target, GLeglImageOES image);
+
+pub type ImageTargetTexture2DOesFn = extern "C" fn(gl::types::GLenum, gl::types::GLeglImageOES);
+
+pub fn image_target_texture_2d_oes() -> Option<ImageTargetTexture2DOesFn> {
+    unsafe {
+        egl()
+            .get_proc_address("glEGLImageTargetTexture2DOES")
+            .map(|f| std::mem::transmute::<_, ImageTargetTexture2DOesFn>(f))
+    }
+}
+
+pub(crate) fn no_context() -> Context {
+    unsafe { Context::from_ptr(NO_CONTEXT) }
+}
+
+pub(crate) fn no_client_buffer() -> ClientBuffer {
+    unsafe { ClientBuffer::from_ptr(std::ptr::null_mut()) }
+}
+
+#[derive(Debug)]
+pub struct DmabufScanout {
+    pub fd: RawFd,
+    pub width: u32,
+    pub height: u32,
+    pub stride: u32,
+    pub fourcc: u32,
+    pub modifier: u64,
+    pub y0_top: bool,
+}
+
+impl Drop for DmabufScanout {
+    fn drop(&mut self) {
+        if self.fd >= 0 {
+            unsafe {
+                libc::close(self.fd);
+            }
+        }
+    }
 }
