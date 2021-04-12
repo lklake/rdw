@@ -95,6 +95,14 @@ mod imp {
                 }
             }));
 
+            obj.connect_motion_relative(clone!(@weak obj => move |_, dx, dy| {
+                let self_ = Self::from_instance(&obj);
+                log::debug!("motion-relative: {:?}", (dx, dy));
+                if let Some(input) = self_.input.upgrade() {
+                    input.motion(dx as _, dy as _, self_.last_button_state());
+                }
+            }));
+
             obj.connect_mouse_press(clone!(@weak obj => move |_, button| {
                 let self_ = Self::from_instance(&obj);
                 log::debug!("mouse-press: {:?}", button);
@@ -216,22 +224,43 @@ mod imp {
                     Cursor => {
                         let cursor = channel.clone().downcast::<spice::CursorChannel>().unwrap();
 
-                        cursor.connect_cursor_move(|_cursor, x, y| {
+                        cursor.connect_cursor_move(clone!(@weak obj => move |_cursor, x, y| {
                             log::debug!("cursor-move: {:?}", (x, y));
-                        });
+                            obj.set_cursor_position(Some((x as _, y as _)));
+                        }));
 
                         cursor.connect_cursor_reset(|_cursor| {
                             log::debug!("cursor-reset");
                         });
 
-                        cursor.connect_cursor_hide(|_cursor| {
+                        cursor.connect_cursor_hide(clone!(@weak obj => move |_cursor| {
                             log::debug!("cursor-hide");
-                        });
+                            let cursor = gdk::Cursor::from_name("none", None);
+                            obj.define_cursor(cursor);
+                        }));
 
-                        cursor.connect_property_cursor_notify(|cursor| {
+                        cursor.connect_property_cursor_notify(clone!(@weak obj => move |cursor| {
                             let cursor = cursor.get_property_cursor();
                             log::debug!("cursor-notify: {:?}", cursor);
-                        });
+                            if let Some(cursor) = cursor {
+                                match cursor.cursor_type() {
+                                    Ok(spice::CursorType::Alpha) => {
+                                        let cursor = rdw::Display::make_cursor(
+                                            cursor.data().unwrap(),
+                                            cursor.width(),
+                                            cursor.height(),
+                                            cursor.hot_x(),
+                                            cursor.hot_y(),
+                                            obj.get_scale_factor()
+                                        );
+                                        obj.define_cursor(Some(cursor));
+                                    }
+                                    e => log::warn!("Unhandled cursor type: {:?}", e),
+                                }
+                            }
+                        }));
+
+                        spice::ChannelExt::connect(&cursor);
                     }
                     _ => {}
                 }

@@ -264,7 +264,7 @@ pub mod imp {
             widget.add_controller(&ec);
             ec.connect_motion(clone!(@weak widget => move |_, x, y| {
                 let self_ = Self::from_instance(&widget);
-                if let Some((x, y)) = self_.transform_input(x, y) {
+                if let Some((x, y)) = self_.transform_pos(x, y) {
                     widget.emit_by_name("motion", &[&x, &y]).unwrap();
                 }
             }));
@@ -279,7 +279,7 @@ pub mod imp {
                     self_.try_grab();
 
                     let button = gesture.get_current_button();
-                    if let Some((x, y)) = self_.transform_input(x, y) {
+                    if let Some((x, y)) = self_.transform_pos(x, y) {
                         widget.emit_by_name("motion", &[&x, &y]).unwrap();
                     }
                     widget.emit_by_name("mouse-press", &[&button]).unwrap();
@@ -288,7 +288,7 @@ pub mod imp {
             ec.connect_released(clone!(@weak widget => move |gesture, _n_press, x, y| {
                 let self_ = Self::from_instance(&widget);
                 let button = gesture.get_current_button();
-                if let Some((x, y)) = self_.transform_input(x, y) {
+                if let Some((x, y)) = self_.transform_pos(x, y) {
                     widget.emit_by_name("motion", &[&x, &y]).unwrap();
                 }
                 widget.emit_by_name("mouse-release", &[&button]).unwrap();
@@ -366,22 +366,32 @@ pub mod imp {
         }
 
         fn snapshot(&self, widget: &Self::Type, snapshot: &gtk::Snapshot) {
+            snapshot.save();
             self.parent_snapshot(widget, snapshot);
+            snapshot.restore();
 
-            if !self.mouse_absolute.get() {
-                if let Some(pos) = self.cursor_position.get() {
-                    if let Some(cursor) = &*self.cursor.borrow() {
-                        if let Some(texture) = cursor.get_texture() {
+            if widget.mouse_absolute() {
+                return;
+            }
+            if !self.grabbed.get().contains(Grab::MOUSE) {
+                return;
+            }
+            if let Some(pos) = self.cursor_position.get() {
+                if let Some(cursor) = &*self.cursor.borrow() {
+                    if let Some(texture) = cursor.get_texture() {
+                        // don't take hotspot as an offset (it's not for hw cursor)
+                        if let Some((x, y)) = self.transform_pos_inv(pos.0.into(), pos.1.into()) {
                             let sf = widget.get_scale_factor();
+
                             snapshot.append_texture(
                                 &texture,
                                 &graphene::Rect::new(
-                                    (pos.0 as i32 - cursor.get_hotspot_x() / sf) as f32,
-                                    (pos.0 as i32 - cursor.get_hotspot_y() / sf) as f32,
+                                    x as f32,
+                                    y as f32,
                                     (texture.get_width() / sf) as f32,
                                     (texture.get_height() / sf) as f32,
                                 ),
-                            )
+                            );
                         }
                     }
                 }
@@ -508,6 +518,10 @@ pub mod imp {
                     rel_pointer.destroy();
                 }
                 self.grabbed.set(self.grabbed.get() - Grab::MOUSE);
+                if !display.mouse_absolute() {
+                    display.set_cursor(None);
+                }
+                display.queue_draw(); // update cursor
                 display.notify("grabbed");
             }
         }
@@ -633,6 +647,7 @@ pub mod imp {
         fn try_grab_mouse(&self) -> bool {
             let obj = self.get_instance();
             if obj.mouse_absolute() {
+                // we could eventually grab the mouse in client mode, but what's the point?
                 return false;
             }
             if obj.grabbed().contains(Grab::MOUSE) {
@@ -656,6 +671,11 @@ pub mod imp {
             }
             if self.try_grab_mouse() {
                 grabbed |= Grab::MOUSE;
+                if !display.mouse_absolute() {
+                    // hide client mouse
+                    display.set_cursor_from_name(Some("none"));
+                }
+                display.queue_draw(); // update cursor
             }
             self.grabbed.set(grabbed);
             display.notify("grabbed");
@@ -713,7 +733,8 @@ pub mod imp {
             })
         }
 
-        fn transform_input(&self, x: f64, y: f64) -> Option<(f64, f64)> {
+        // widget -> remote display pos
+        fn transform_pos(&self, x: f64, y: f64) -> Option<(f64, f64)> {
             let display = self.get_instance();
             let sf = display.get_scale_factor() as f64;
             self.viewport().and_then(|vp| {
@@ -725,6 +746,18 @@ pub mod imp {
                 let x = (x - vp.x as f64) * (sw as f64 / vp.width as f64);
                 let y = (y - vp.y as f64) * (sh as f64 / vp.height as f64);
                 Some((x, y))
+            })
+        }
+
+        // remote display pos -> widget pos
+        fn transform_pos_inv(&self, x: f64, y: f64) -> Option<(f64, f64)> {
+            let display = self.get_instance();
+            let sf = display.get_scale_factor() as f64;
+            self.viewport().map(|vp| {
+                let (sw, sh) = display.display_size().unwrap();
+                let x = x * (vp.width as f64 / sw as f64) + vp.x as f64;
+                let y = y * (vp.height as f64 / sh as f64) + vp.y as f64;
+                (x / sf as f64, y / sf as f64)
             })
         }
 
@@ -860,8 +893,9 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         // Safety: safe because IsA<Display>
         let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
 
-        // TODO: for now client side only
-        self.set_cursor(cursor.as_ref());
+        if self.mouse_absolute() {
+            self.set_cursor(cursor.as_ref());
+        }
         self_.cursor.replace(cursor);
     }
 
@@ -878,6 +912,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
 
         if absolute {
             self_.ungrab_mouse();
+            self.set_cursor(self_.cursor.borrow().as_ref());
         }
 
         self_.mouse_absolute.set(absolute);
@@ -887,12 +922,8 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         // Safety: safe because IsA<Display>
         let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
 
-        if pos.is_some() {
-            self.set_cursor_from_name(Some("none"));
-        } else {
-            self.set_cursor(self_.cursor.borrow().as_ref());
-        }
         self_.cursor_position.set(pos);
+        self.queue_draw();
     }
 
     fn grabbed(&self) -> Grab {
