@@ -137,6 +137,14 @@ mod imp {
                         let main = channel.clone().downcast::<spice::MainChannel>().unwrap();
                         self_.main.set(Some(&main));
 
+                        main.connect_channel_event(clone!(@weak obj => move |_, event| {
+                            use spice::ChannelEvent::*;
+
+                            let self_ = Self::from_instance(&obj);
+                            if event == Closed {
+                                self_.session.disconnect();
+                            }
+                        }));
                         main.connect_main_mouse_update(clone!(@weak obj => move |main| {
                             let mode = spice::MouseMode::from_bits_truncate(main.get_property_mouse_mode());
                             log::debug!("mouse-update: {:?}", mode);
