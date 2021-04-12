@@ -6,6 +6,7 @@ use keycodemap::KEYMAP_XORGEVDEV2XTKBD;
 use rdw::DisplayExt;
 use spice::ChannelExt;
 use spice_client_glib as spice;
+use std::os::unix::io::IntoRawFd;
 
 mod imp {
     use std::cell::Cell;
@@ -196,15 +197,28 @@ mod imp {
                             self_.invalidate(x as _, y as _, w as _, h as _);
                         }));
 
-                        dpy.connect_property_gl_scanout_notify(|dpy| {
+                        dpy.connect_property_gl_scanout_notify(clone!(@weak obj => move |dpy| {
                             let scanout = dpy.get_gl_scanout();
                             log::debug!("notify::gl-scanout: {:?}", scanout);
-                        });
+
+                            if let Some(scanout) = scanout {
+                                obj.set_dmabuf_scanout(rdw::DmabufScanout {
+                                    width: scanout.width(),
+                                    height: scanout.height(),
+                                    stride: scanout.stride(),
+                                    fourcc: scanout.format(),
+                                    y0_top: scanout.y0_top(),
+                                    modifier: 0,
+                                    fd: scanout.into_raw_fd(),
+                                });
+                            }
+                        }));
 
                         dpy.connect_property_monitors_notify(clone!(@weak obj => move |dpy| {
                             let self_ = Self::from_instance(&obj);
                             let monitors = dpy.get_property_monitors();
                             log::debug!("notify::monitors: {:?}", monitors);
+
                             let monitor_config = monitors.and_then(|m| m.get(self_.nth_monitor).copied());
                             if let Some((0, 0, w, h)) = monitor_config.map(|c| c.geometry()) {
                                 obj.set_display_size(Some((w, h)));
@@ -215,9 +229,12 @@ mod imp {
                             self_.monitor_config.set(monitor_config);
                         }));
 
-                        dpy.connect_gl_draw(|_dpy, x, y, w, h| {
+                        dpy.connect_gl_draw(clone!(@weak obj => move |dpy, x, y, w, h| {
+                            //let self_ = Self::from_instance(&obj);
                             log::debug!("gl-draw: {:?}", (x, y, w, h));
-                        });
+
+                            dpy.gl_draw_done();
+                        }));
 
                         spice::ChannelExt::connect(&dpy);
                     },
