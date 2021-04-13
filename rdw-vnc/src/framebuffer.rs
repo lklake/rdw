@@ -74,7 +74,7 @@ impl Framebuffer {
     pub fn get_sub(&self, x: usize, y: usize, w: usize, h: usize) -> &[u8] {
         let self_ = imp::Framebuffer::from_instance(self);
         let buf = self_.buffer.get().unwrap();
-        let bw: usize = self.get_width().into();
+        let bw: usize = self.width().into();
         let start = (x + y * bw) * 4;
         let end = (x + w + (y + h - 1) * bw) * 4;
         &buf[start..end]

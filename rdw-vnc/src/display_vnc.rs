@@ -137,7 +137,7 @@ mod imp {
 
             obj.connect_resize_request(clone!(@weak obj => move |_, width, height, wmm, hmm| {
                 let self_ = Self::from_instance(&obj);
-                let sf = obj.get_scale_factor() as u32;
+                let sf = obj.scale_factor() as u32;
                 let (width, height) = (width / sf, height / sf);
                 let status = self_.connection.set_size(width, height);
                 log::debug!("resize-request: {:?} -> {:?}", (width, height, wmm, hmm), status);
@@ -183,8 +183,8 @@ mod imp {
                 log::debug!("cursor-changed: {:?}", &cursor);
                 obj.define_cursor(
                     cursor.map(|c|{
-                        let (w, h, hot_x, hot_y, data) = (c.get_width(), c.get_height(), c.get_hotx(), c.get_hoty(), c.get_data());
-                        rdw::Display::make_cursor(data, w.into(), h.into(), hot_x.into(), hot_y.into(), obj.get_scale_factor())
+                        let (w, h, hot_x, hot_y, data) = (c.width(), c.height(), c.hotx(), c.hoty(), c.data());
+                        rdw::Display::make_cursor(data, w.into(), h.into(), hot_x.into(), hot_y.into(), obj.scale_factor())
                     })
                 );
             }));
@@ -210,7 +210,7 @@ mod imp {
                             w.try_into().unwrap(),
                             h.try_into().unwrap()
                         );
-                        obj.update_area(x, y, w, h, (fb.get_width() * 4).into(), sub);
+                        obj.update_area(x, y, w, h, (fb.width() * 4).into(), sub);
                     }
                     if let Err(e) = self_.framebuffer_update_request(true) {
                         log::warn!("Failed to update framebuffer: {}", e);
@@ -269,7 +269,7 @@ mod imp {
         }
 
         fn button_event(&self, press: bool, button: u8) {
-            let obj = self.get_instance();
+            let obj = self.instance();
             let (x, y) = if obj.mouse_absolute() {
                 self.last_motion
                     .get()
@@ -312,8 +312,8 @@ mod imp {
         }
 
         fn do_framebuffer_init(&self) {
-            let remote_format = self.connection.get_pixel_format().unwrap();
-            let (width, height) = (self.connection.get_width(), self.connection.get_height());
+            let remote_format = self.connection.pixel_format().unwrap();
+            let (width, height) = (self.connection.width(), self.connection.height());
             let fb = Framebuffer::new(
                 width.try_into().unwrap(),
                 height.try_into().unwrap(),
@@ -328,8 +328,8 @@ mod imp {
                 incremental,
                 0,
                 0,
-                self.connection.get_width().try_into().unwrap(),
-                self.connection.get_height().try_into().unwrap(),
+                self.connection.width().try_into().unwrap(),
+                self.connection.height().try_into().unwrap(),
             )
         }
 
@@ -362,7 +362,7 @@ mod imp {
                 Raw,
             ];
 
-            let mut format = self.connection.get_pixel_format().unwrap();
+            let mut format = self.connection.pixel_format().unwrap();
             log::debug!("format: {:?}", format);
             format.set_byte_order(gvnc::ByteOrder::Little);
             self.connection.set_pixel_format(&format)?;
@@ -372,7 +372,7 @@ mod imp {
             fn pixbuf_supports(fmt: &str) -> bool {
                 gtk::gdk_pixbuf::Pixbuf::get_formats()
                     .iter()
-                    .any(|f| f.get_name().map_or(false, |name| name.as_str() == fmt))
+                    .any(|f| f.name().map_or(false, |name| name.as_str() == fmt))
             }
 
             if pixbuf_supports("jpeg") {
