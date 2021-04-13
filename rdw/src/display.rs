@@ -137,14 +137,14 @@ pub mod imp {
             if let Some(source) = self.wl_source.take() {
                 glib::source_remove(source);
             }
-            while let Some(child) = obj.get_first_child() {
+            while let Some(child) = obj.first_child() {
                 child.unparent();
             }
         }
 
         fn properties() -> &'static [glib::ParamSpec] {
             static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
-                vec![glib::ParamSpec::flags(
+                vec![glib::ParamSpec::new_flags(
                     "grabbed",
                     "grabbed",
                     "Grabbed",
@@ -234,7 +234,7 @@ pub mod imp {
             widget.set_focusable(true);
             widget.set_focus_on_click(true);
 
-            if let Ok(dpy) = widget.get_display().downcast::<gdk_wl::WaylandDisplay>() {
+            if let Ok(dpy) = widget.display().downcast::<gdk_wl::WaylandDisplay>() {
                 self.realize_wl(&dpy);
             }
 
@@ -281,7 +281,7 @@ pub mod imp {
 
                     self_.try_grab();
 
-                    let button = gesture.get_current_button();
+                    let button = gesture.current_button();
                     if let Some((x, y)) = self_.transform_pos(x, y) {
                         widget.emit_by_name("motion", &[&x, &y]).unwrap();
                     }
@@ -290,7 +290,7 @@ pub mod imp {
             );
             ec.connect_released(clone!(@weak widget => move |gesture, _n_press, x, y| {
                 let self_ = Self::from_instance(&widget);
-                let button = gesture.get_current_button();
+                let button = gesture.current_button();
                 if let Some((x, y)) = self_.transform_pos(x, y) {
                     widget.emit_by_name("motion", &[&x, &y]).unwrap();
                 }
@@ -361,14 +361,14 @@ pub mod imp {
                 std::time::Duration::from_millis(500),
                 clone!(@weak widget => @default-return glib::Continue(false), move || {
                     let self_ = Self::from_instance(&widget);
-                    let sf = widget.get_scale_factor() as u32;
+                    let sf = widget.scale_factor() as u32;
                     let width = width as u32 * sf;
                     let height = height as u32 * sf;
-                    let mm = self_.get_surface()
+                    let mm = self_.surface()
                                    .as_ref()
-                                   .and_then(|s| widget.get_display().get_monitor_at_surface(s))
+                                   .and_then(|s| widget.display().get_monitor_at_surface(s))
                                    .map(|m| {
-                                       let (geom, wmm, hmm) = (m.get_geometry(), m.get_width_mm() as u32, m.get_height_mm() as u32);
+                                       let (geom, wmm, hmm) = (m.geometry(), m.width_mm() as u32, m.height_mm() as u32);
                                        (wmm * width / (geom.width as u32), hmm * height / geom.height as u32)
                                    }).unwrap_or((0u32, 0u32));
                     widget.emit_by_name("resize-request", &[&width, &height, &mm.0, &mm.1]).unwrap();
@@ -391,18 +391,18 @@ pub mod imp {
             }
             if let Some(pos) = self.cursor_position.get() {
                 if let Some(cursor) = &*self.cursor.borrow() {
-                    if let Some(texture) = cursor.get_texture() {
+                    if let Some(texture) = cursor.texture() {
                         // don't take hotspot as an offset (it's not for hw cursor)
                         if let Some((x, y)) = self.transform_pos_inv(pos.0.into(), pos.1.into()) {
-                            let sf = widget.get_scale_factor();
+                            let sf = widget.scale_factor();
 
                             snapshot.append_texture(
                                 &texture,
                                 &graphene::Rect::new(
                                     x as f32,
                                     y as f32,
-                                    (texture.get_width() / sf) as f32,
-                                    (texture.get_height() / sf) as f32,
+                                    (texture.width() / sf) as f32,
+                                    (texture.height() / sf) as f32,
                                 ),
                             );
                         }
@@ -415,7 +415,7 @@ pub mod imp {
     impl Display {
         fn realize_wl(&self, dpy: &gdk_wl::WaylandDisplay) {
             let display = unsafe {
-                WlDisplay::from_external_display(dpy.get_wl_display().as_ref().c_ptr() as *mut _)
+                WlDisplay::from_external_display(dpy.wl_display().as_ref().c_ptr() as *mut _)
             };
             let mut event_queue = display.create_event_queue();
             let attached_display = display.attach(event_queue.token());
@@ -502,7 +502,7 @@ pub mod imp {
         }
 
         fn ungrab_keyboard(&self) {
-            let display = self.get_instance();
+            let display = self.instance();
 
             if !self.grabbed.get().contains(Grab::KEYBOARD) {
                 return;
@@ -513,14 +513,14 @@ pub mod imp {
                 let self_ = Self::from_instance(&display);
                 match self_.grab_ec.upgrade() {
                     Some(ec) => {
-                        if let Some(widget) = ec.get_widget() {
+                        if let Some(widget) = ec.widget() {
                             widget.remove_controller(&ec);
                         }
                         self_.grab_ec.set(None);
                     },
                     _ => log::debug!("No grab event-controller?"),
                 };
-                if let Some(toplevel) = self_.get_toplevel() {
+                if let Some(toplevel) = self_.toplevel() {
                     toplevel.restore_system_shortcuts();
                     self_.grabbed.set(self_.grabbed.get() - Grab::KEYBOARD);
                     display.notify("grabbed");
@@ -530,7 +530,7 @@ pub mod imp {
         }
 
         pub(crate) fn ungrab_mouse(&self) {
-            let display = self.get_instance();
+            let display = self.instance();
 
             if self.grabbed.get().contains(Grab::MOUSE) {
                 if let Some(lock) = self.wl_lock_pointer.take() {
@@ -549,9 +549,9 @@ pub mod imp {
         }
 
         fn key_pressed(&self, ec: &gtk::EventControllerKey, keyval: gdk::keys::Key, keycode: u32) {
-            let display = self.get_instance();
+            let display = self.instance();
 
-            if let Some(ref e) = ec.get_current_event() {
+            if let Some(ref e) = ec.current_event() {
                 if self.grab_shortcut.get().unwrap().trigger(e, false) == gdk::KeyMatch::Exact {
                     if self.grabbed.get().is_empty() {
                         self.try_grab();
@@ -569,7 +569,7 @@ pub mod imp {
         }
 
         fn key_released(&self, keyval: gdk::keys::Key, keycode: u32) {
-            let display = self.get_instance();
+            let display = self.instance();
 
             display
                 .emit_by_name("key-release", &[&*keyval, &keycode])
@@ -581,8 +581,8 @@ pub mod imp {
                 return false;
             }
 
-            let obj = self.get_instance();
-            let toplevel = match self.get_toplevel() {
+            let obj = self.instance();
+            let toplevel = match self.toplevel() {
                 Some(toplevel) => toplevel,
                 _ => return false,
             };
@@ -601,14 +601,14 @@ pub mod imp {
                     self_.key_released(keyval, keycode);
                 }),
             );
-            if let Some(root) = obj.get_root() {
+            if let Some(root) = obj.root() {
                 root.add_controller(&ec);
             }
             self.grab_ec.set(Some(&ec));
 
             let id = toplevel.connect_property_shortcuts_inhibited_notify(
                 clone!(@weak obj => @default-panic, move |toplevel| {
-                    let inhibited = toplevel.get_property_shortcuts_inhibited();
+                    let inhibited = toplevel.is_shortcuts_inhibited();
                     log::debug!("shortcuts-inhibited: {}", inhibited);
                     if !inhibited {
                         let self_ = Self::from_instance(&obj);
@@ -627,12 +627,12 @@ pub mod imp {
                 Ok(device) => device,
                 _ => return false,
             };
-            let pointer = device.get_wl_pointer();
-            let obj = self.get_instance();
+            let pointer = device.wl_pointer();
+            let obj = self.instance();
 
             if self.wl_lock_pointer.borrow().is_none() {
                 if let Some(constraints) = self.wl_pointer_constraints.get() {
-                    if let Some(surf) = self.get_wl_surface() {
+                    if let Some(surf) = self.wl_surface() {
                         let lock = constraints.lock_pointer(
                             &surf,
                             &pointer,
@@ -653,7 +653,7 @@ pub mod imp {
                     rel_pointer.quick_assign(
                         clone!(@weak obj => @default-panic, move |_, event, _| {
                             if let RelEvent::RelativeMotion { dx_unaccel, dy_unaccel, .. } = event {
-                                let scale = obj.get_scale_factor() as f64;
+                                let scale = obj.scale_factor() as f64;
                                 let (dx, dy) = (dx_unaccel / scale, dy_unaccel / scale);
                                 obj.emit_by_name("motion-relative", &[&dx, &dy]).unwrap();
                             }
@@ -667,7 +667,7 @@ pub mod imp {
         }
 
         fn try_grab_mouse(&self) -> bool {
-            let obj = self.get_instance();
+            let obj = self.instance();
             if obj.mouse_absolute() {
                 // we could eventually grab the mouse in client mode, but what's the point?
                 return false;
@@ -676,7 +676,7 @@ pub mod imp {
                 return false;
             }
 
-            let default_seat = obj.get_display().get_default_seat();
+            let default_seat = obj.display().default_seat();
 
             for device in default_seat.get_devices(gdk::SeatCapabilities::POINTER) {
                 self.try_grab_device(device);
@@ -686,7 +686,7 @@ pub mod imp {
         }
 
         fn try_grab(&self) {
-            let display = self.get_instance();
+            let display = self.instance();
             let mut grabbed = display.grabbed();
             if self.try_grab_keyboard() {
                 grabbed |= Grab::KEYBOARD;
@@ -723,13 +723,13 @@ pub mod imp {
         }
 
         fn borders(&self) -> (u32, u32) {
-            let display = self.get_instance();
+            let display = self.instance();
             let (dw, dh) = match display.display_size() {
                 Some(size) => size,
                 None => return (0, 0),
             };
-            let sf = display.get_scale_factor();
-            let (w, h) = (display.get_width() * sf, display.get_height() * sf);
+            let sf = display.scale_factor();
+            let (w, h) = (display.width() * sf, display.height() * sf);
             let (sw, sh) = (w as f32 / dw as f32, h as f32 / dh as f32);
 
             if sw < sh {
@@ -742,11 +742,11 @@ pub mod imp {
         }
 
         pub(crate) fn viewport(&self) -> Option<gdk::Rectangle> {
-            let display = self.get_instance();
+            let display = self.instance();
             display.display_size()?;
 
-            let sf = display.get_scale_factor();
-            let (w, h) = (display.get_width() * sf, display.get_height() * sf);
+            let sf = display.scale_factor();
+            let (w, h) = (display.width() * sf, display.height() * sf);
             let (borderw, borderh) = self.borders();
             let (borderw, borderh) = (borderw as i32, borderh as i32);
             Some(gdk::Rectangle {
@@ -759,8 +759,8 @@ pub mod imp {
 
         // widget -> remote display pos
         fn transform_pos(&self, x: f64, y: f64) -> Option<(f64, f64)> {
-            let display = self.get_instance();
-            let sf = display.get_scale_factor() as f64;
+            let display = self.instance();
+            let sf = display.scale_factor() as f64;
             self.viewport().and_then(|vp| {
                 let (x, y) = (x * sf, y * sf);
                 if !vp.contains_point(x as _, y as _) {
@@ -775,8 +775,8 @@ pub mod imp {
 
         // remote display pos -> widget pos
         fn transform_pos_inv(&self, x: f64, y: f64) -> Option<(f64, f64)> {
-            let display = self.get_instance();
-            let sf = display.get_scale_factor() as f64;
+            let display = self.instance();
+            let sf = display.scale_factor() as f64;
             self.viewport().map(|vp| {
                 let (sw, sh) = display.display_size().unwrap();
                 let x = x * (vp.width as f64 / sw as f64) + vp.x as f64;
@@ -785,36 +785,36 @@ pub mod imp {
             })
         }
 
-        fn get_toplevel(&self) -> Option<gdk::Toplevel> {
-            let display = self.get_instance();
+        fn toplevel(&self) -> Option<gdk::Toplevel> {
+            let display = self.instance();
             display
-                .get_root()
-                .and_then(|r| r.get_native())
-                .and_then(|n| n.get_surface())
+                .root()
+                .and_then(|r| r.native())
+                .and_then(|n| n.surface())
                 .and_then(|s| s.downcast::<gdk::Toplevel>().ok())
         }
 
-        fn get_surface(&self) -> Option<gdk::Surface> {
-            let display = self.get_instance();
-            display.get_native().and_then(|n| n.get_surface())
+        fn surface(&self) -> Option<gdk::Surface> {
+            let display = self.instance();
+            display.native().and_then(|n| n.surface())
         }
 
-        fn get_wl_surface(&self) -> Option<wayland_client::protocol::wl_surface::WlSurface> {
-            self.get_surface()
+        fn wl_surface(&self) -> Option<wayland_client::protocol::wl_surface::WlSurface> {
+            self.surface()
                 .and_then(|s| s.downcast::<gdk_wl::WaylandSurface>().ok())
-                .map(|w| w.get_wl_surface())
+                .map(|w| w.wl_surface())
         }
 
         pub(crate) fn egl_display(&self) -> Option<egl::Display> {
-            let widget = self.get_instance();
+            let widget = self.instance();
             let egl = egl::egl();
 
-            if let Ok(dpy) = widget.get_display().downcast::<gdk_wl::WaylandDisplay>() {
-                let wl_dpy = dpy.get_wl_display();
+            if let Ok(dpy) = widget.display().downcast::<gdk_wl::WaylandDisplay>() {
+                let wl_dpy = dpy.wl_display();
                 return egl.get_display(wl_dpy.as_ref().c_ptr() as _);
             }
 
-            if let Ok(dpy) = widget.get_display().downcast::<gdk_x11::X11Display>() {
+            if let Ok(dpy) = widget.display().downcast::<gdk_x11::X11Display>() {
                 let _dpy =
                     unsafe { gdk_x11::ffi::gdk_x11_display_get_xdisplay(dpy.to_glib_none().0) };
                 log::warn!("X11: unsupported display kind, todo");
@@ -850,7 +850,7 @@ impl Display {
                 gdk::gdk_pixbuf::InterpType::Bilinear,
             )
             .unwrap();
-        let tex = gdk::Texture::new_for_pixbuf(&pb);
+        let tex = gdk::Texture::for_pixbuf(&pb);
         gdk::Cursor::from_texture(&tex, hot_x * scale, hot_y * scale, None)
     }
 }
