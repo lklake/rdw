@@ -138,7 +138,7 @@ mod imp {
                 use spice::ChannelType::*;
                 let self_ = Self::from_instance(&obj);
 
-                let type_ = match spice::ChannelType::try_from(channel.get_property_channel_type()) {
+                let type_ = match spice::ChannelType::try_from(channel.channel_type()) {
                     Ok(t) => t,
                     _ => return,
                 };
@@ -157,7 +157,7 @@ mod imp {
                             }
                         }));
                         main.connect_main_mouse_update(clone!(@weak obj => move |main| {
-                            let mode = spice::MouseMode::from_bits_truncate(main.get_property_mouse_mode());
+                            let mode = spice::MouseMode::from_bits_truncate(main.mouse_mode());
                             log::debug!("mouse-update: {:?}", mode);
                             obj.set_mouse_absolute(mode.contains(spice::MouseMode::CLIENT));
                         }));
@@ -167,10 +167,10 @@ mod imp {
                         self_.input.set(Some(&input));
 
                         input.connect_inputs_modifiers(clone!(@weak obj => move |input| {
-                            let modifiers = input.get_property_key_modifiers();
+                            let modifiers = input.key_modifiers();
                             log::debug!("inputs-modifiers: {}", modifiers);
                             input.connect_channel_event(clone!(@weak obj => move |input, event| {
-                                if event == spice::ChannelEvent::Opened && input.get_property_socket().unwrap().get_family() == gio::SocketFamily::Unix {
+                                if event == spice::ChannelEvent::Opened && input.socket().unwrap().family() == gio::SocketFamily::Unix {
                                     log::debug!("on unix socket");
                                 }
                             }));
@@ -200,7 +200,7 @@ mod imp {
                         }));
 
                         dpy.connect_property_gl_scanout_notify(clone!(@weak obj => move |dpy| {
-                            let scanout = dpy.get_gl_scanout();
+                            let scanout = dpy.gl_scanout();
                             log::debug!("notify::gl-scanout: {:?}", scanout);
 
                             if let Some(scanout) = scanout {
@@ -224,7 +224,7 @@ mod imp {
 
                         dpy.connect_property_monitors_notify(clone!(@weak obj => move |dpy| {
                             let self_ = Self::from_instance(&obj);
-                            let monitors = dpy.get_property_monitors();
+                            let monitors = dpy.monitors();
                             log::debug!("notify::monitors: {:?}", monitors);
 
                             let monitor_config = monitors.and_then(|m| m.get(self_.nth_monitor).copied());
@@ -259,7 +259,7 @@ mod imp {
                         }));
 
                         cursor.connect_property_cursor_notify(clone!(@weak obj => move |cursor| {
-                            let cursor = cursor.get_property_cursor();
+                            let cursor = cursor.cursor();
                             log::debug!("cursor-notify: {:?}", cursor);
                             if let Some(cursor) = cursor {
                                 match cursor.cursor_type() {
@@ -270,7 +270,7 @@ mod imp {
                                             cursor.height(),
                                             cursor.hot_x(),
                                             cursor.hot_y(),
-                                            obj.get_scale_factor()
+                                            obj.scale_factor()
                                         );
                                         obj.define_cursor(Some(cursor));
                                     }
@@ -354,7 +354,7 @@ mod imp {
         }
 
         fn invalidate(&self, x: usize, y: usize, w: usize, h: usize) {
-            let obj = self.get_instance();
+            let obj = self.instance();
 
             let (monitor_x, monitor_y, _w, _h) = match self.monitor_config.get() {
                 Some(config) => config.geometry(),

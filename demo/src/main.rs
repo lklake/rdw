@@ -13,7 +13,7 @@ fn show_error(app: gtk::Application, msg: &str) {
         .modal(true)
         .buttons(gtk::ButtonsType::Ok)
         .text(msg);
-    if let Some(parent) = app.get_active_window() {
+    if let Some(parent) = app.active_window() {
         dialog = dialog.transient_for(&parent);
     }
     let dialog = dialog.build();
@@ -27,11 +27,11 @@ fn show_error(app: gtk::Application, msg: &str) {
 fn vnc_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
     let has_error = Arc::new(AtomicBool::new(false));
 
-    let mut port = uri.get_port();
+    let mut port = uri.port();
     if port == -1 {
         port = 5900;
     }
-    let host = uri.get_host().unwrap_or_else(|| "localhost".into());
+    let host = uri.host().unwrap_or_else(|| "localhost".into());
     let vnc = rdw_vnc::DisplayVnc::new();
     vnc.connection()
         .open_host(&host, &format!("{}", port))
@@ -61,11 +61,11 @@ fn vnc_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
                 .modal(true)
                 .buttons(gtk::ButtonsType::Ok)
                 .text("Credentials required");
-            if let Some(parent) = app.get_active_window() {
+            if let Some(parent) = app.active_window() {
                 dialog = dialog.transient_for(&parent);
             }
             let dialog = dialog.build();
-            let content = dialog.get_content_area();
+            let content = dialog.content_area();
             let grid = gtk::GridBuilder::new()
                 .hexpand(true)
                 .vexpand(true)
@@ -88,10 +88,10 @@ fn vnc_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
             let run_dialog = clone!(@weak conn, @strong username, @strong password => async move {
                 dialog.run_future().await;
                 if creds.contains(&Username) {
-                    conn.set_credential(Username.to_glib(), &username.get_text()).unwrap();
+                    conn.set_credential(Username.to_glib(), &username.text()).unwrap();
                 }
                 if creds.contains(&Password) {
-                    conn.set_credential(Password.to_glib(), &password.get_text()).unwrap();
+                    conn.set_credential(Password.to_glib(), &password.text()).unwrap();
                 }
                 if creds.contains(&Clientname) {
                     conn.set_credential(Clientname.to_glib(), "rdw-vnc").unwrap();
@@ -109,14 +109,14 @@ fn spice_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
     let spice = rdw_spice::DisplaySpice::new();
     let session = spice.session();
 
-    session.set_property_uri(Some(&uri.to_string()));
+    session.set_uri(Some(&uri.to_string()));
 
     session.connect_channel_new(clone!(@weak app => move |_, channel| {
         if let Ok(main) = channel.clone().downcast::<spice::MainChannel>() {
             main.connect_channel_event(clone!(@weak app => move |channel, event| {
                 use spice::ChannelEvent::*;
                 if event == ErrorConnect {
-                    if let Some(err) = channel.get_error() {
+                    if let Some(err) = channel.error() {
                         show_error(app, &err.to_string());
                     }
                 }
@@ -139,7 +139,7 @@ fn make_display(app: &gtk::Application, mut uri: String) -> rdw::Display {
 
     let uri = glib::Uri::parse(&uri, glib::UriFlags::NONE).unwrap();
 
-    match uri.get_scheme().as_str() {
+    match uri.scheme().as_str() {
         "vnc" => vnc_display(app, uri),
         spice if spice.starts_with("spice") => spice_display(app, uri),
         scheme => panic!("Unhandled scheme {}", scheme),
@@ -194,7 +194,7 @@ fn main() {
     let dpy = display.clone();
     app.connect_command_line(move |app, cl| {
         let uri = cl
-            .get_options_dict()
+            .options_dict()
             .lookup_value(&glib::OPTION_REMAINING, None)
             .and_then(|args| args.get_child_value(0).get::<String>())
             .unwrap_or_else(|| "vnc://localhost".to_string());
