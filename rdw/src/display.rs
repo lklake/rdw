@@ -209,7 +209,12 @@ pub mod imp {
                     .build(),
                     Signal::builder(
                         "resize-request",
-                        &[u32::static_type().into(), u32::static_type().into()],
+                        &[
+                            u32::static_type().into(),
+                            u32::static_type().into(),
+                            u32::static_type().into(),
+                            u32::static_type().into(),
+                        ],
                         <()>::static_type().into(),
                     )
                     .flags(glib::SignalFlags::ACTION)
@@ -345,7 +350,17 @@ pub mod imp {
                 std::time::Duration::from_millis(500),
                 clone!(@weak widget => @default-return glib::Continue(false), move || {
                     let self_ = Self::from_instance(&widget);
-                    widget.emit_by_name("resize-request", &[&(width as u32), &(height as u32)]).unwrap();
+                    let sf = widget.get_scale_factor() as u32;
+                    let width = width as u32 * sf;
+                    let height = height as u32 * sf;
+                    let mm = self_.get_surface()
+                                   .as_ref()
+                                   .and_then(|s| widget.get_display().get_monitor_at_surface(s))
+                                   .map(|m| {
+                                       let (geom, wmm, hmm) = (m.get_geometry(), m.get_width_mm() as u32, m.get_height_mm() as u32);
+                                       (wmm * width / (geom.width as u32), hmm * height / geom.height as u32)
+                                   }).unwrap_or((0u32, 0u32));
+                    widget.emit_by_name("resize-request", &[&width, &height, &mm.0, &mm.1]).unwrap();
                     self_.resize_timeout_id.set(None);
                     glib::Continue(false)
                 }),
@@ -759,11 +774,13 @@ pub mod imp {
                 .and_then(|s| s.downcast::<gdk::Toplevel>().ok())
         }
 
-        fn get_wl_surface(&self) -> Option<wayland_client::protocol::wl_surface::WlSurface> {
+        fn get_surface(&self) -> Option<gdk::Surface> {
             let display = self.get_instance();
-            display
-                .get_native()
-                .and_then(|n| n.get_surface())
+            display.get_native().and_then(|n| n.get_surface())
+        }
+
+        fn get_wl_surface(&self) -> Option<wayland_client::protocol::wl_surface::WlSurface> {
+            self.get_surface()
                 .and_then(|s| s.downcast::<gdk_wl::WaylandSurface>().ok())
                 .map(|w| w.get_wl_surface())
         }
@@ -859,7 +876,10 @@ pub trait DisplayExt: 'static {
 
     fn connect_property_grabbed_notify<F: Fn(&Self) + 'static>(&self, f: F) -> SignalHandlerId;
 
-    fn connect_resize_request<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId;
+    fn connect_resize_request<F: Fn(&Self, u32, u32, u32, u32) + 'static>(
+        &self,
+        f: F,
+    ) -> SignalHandlerId;
 }
 
 impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O {
@@ -1272,11 +1292,16 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
             )
         }
     }
-    fn connect_resize_request<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId {
-        unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, u32, u32) + 'static>(
+    fn connect_resize_request<F: Fn(&Self, u32, u32, u32, u32) + 'static>(
+        &self,
+        f: F,
+    ) -> SignalHandlerId {
+        unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, u32, u32, u32, u32) + 'static>(
             this: *mut imp::RdwDisplay,
             width: u32,
             height: u32,
+            width_mm: u32,
+            height_mm: u32,
             f: glib::ffi::gpointer,
         ) where
             P: IsA<Display>,
@@ -1286,6 +1311,8 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
                 &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
                 width,
                 height,
+                width_mm,
+                height_mm,
             )
         }
         unsafe {

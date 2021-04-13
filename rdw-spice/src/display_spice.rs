@@ -122,10 +122,12 @@ mod imp {
                 self_.scroll(scroll);
             }));
 
-            obj.connect_resize_request(clone!(@weak obj => move |_, width, height| {
+            obj.connect_resize_request(clone!(@weak obj => move |_, width, height, wmm, hmm| {
                 let self_ = Self::from_instance(&obj);
                 log::debug!("resize-request: {:?}", (width, height));
                 if let Some(main) = self_.main.upgrade() {
+                    main.update_display_enabled(self_.nth_monitor as _, true, false);
+                    main.update_display_mm(self_.nth_monitor as _, wmm as _, hmm as _, false);
                     main.update_display(self_.nth_monitor as _, 0, 0, width as _, height as _, true);
                 }
             }));
