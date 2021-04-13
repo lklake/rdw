@@ -111,20 +111,12 @@ pub mod imp {
             gl_area.set_has_stencil_buffer(false);
             gl_area.set_auto_render(false);
             gl_area.set_required_version(3, 2);
-            gl_area.connect_render(clone!(@weak obj => @default-return glib::signal::Inhibit(true), move |_, _| unsafe {
-                let self_ = Self::from_instance(&obj);
-
-                gl::ClearColor(0.1, 0.1, 0.1, 1.0);
-                gl::Clear(gl::COLOR_BUFFER_BIT);
-                gl::Disable(gl::BLEND);
-
-                if let Some(vp) = self_.viewport() {
-                    gl::Viewport(vp.x, vp.y, vp.width, vp.height);
-                    self_.texture_blit(false);
-                }
-
-                glib::signal::Inhibit(true)
-            }));
+            gl_area.connect_render(
+                clone!(@weak obj => @default-return glib::signal::Inhibit(true), move |_, _| {
+                    obj.render();
+                    glib::signal::Inhibit(true)
+                }),
+            );
             gl_area.connect_realize(clone!(@weak obj => move |_| {
                 let self_ = Self::from_instance(&obj);
                 if let Err(e) = unsafe { self_.realize_gl() } {
@@ -680,17 +672,19 @@ pub mod imp {
             self.texture_id.get()
         }
 
-        unsafe fn texture_blit(&self, flip: bool) {
-            gl::UseProgram(if flip {
-                todo!();
-                //self.texture_blit_flip_prog.get()
-            } else {
-                self.texture_blit_prog.get()
-            });
-            gl::ActiveTexture(gl::TEXTURE0);
-            gl::BindTexture(gl::TEXTURE_2D, self.texture_id());
-            gl::BindVertexArray(self.texture_blit_vao.get());
-            gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
+        pub(crate) fn texture_blit(&self, flip: bool) {
+            unsafe {
+                gl::UseProgram(if flip {
+                    todo!();
+                    //self.texture_blit_flip_prog.get()
+                } else {
+                    self.texture_blit_prog.get()
+                });
+                gl::ActiveTexture(gl::TEXTURE0);
+                gl::BindTexture(gl::TEXTURE_2D, self.texture_id());
+                gl::BindVertexArray(self.texture_blit_vao.get());
+                gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
+            }
         }
 
         fn borders(&self) -> (u32, u32) {
@@ -712,7 +706,7 @@ pub mod imp {
             }
         }
 
-        fn viewport(&self) -> Option<gdk::Rectangle> {
+        pub(crate) fn viewport(&self) -> Option<gdk::Rectangle> {
             let display = self.get_instance();
             display.display_size()?;
 
@@ -844,6 +838,8 @@ pub trait DisplayExt: 'static {
     fn update_area(&self, x: i32, y: i32, w: i32, h: i32, stride: i32, data: &[u8]);
 
     fn set_dmabuf_scanout(&self, s: DmabufScanout);
+
+    fn render(&self);
 
     fn set_alternative_text(&self, alt_text: &str);
 
@@ -1043,6 +1039,27 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         if let Err(e) = egl.destroy_image(egl_dpy, img) {
             log::warn!("eglDestroyImage() failed: {}", e);
         }
+    }
+
+    fn render(&self) {
+        // Safety: safe because IsA<Display>
+        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
+
+        self_.gl_area().make_current();
+        self_.gl_area().attach_buffers();
+
+        unsafe {
+            gl::ClearColor(0.1, 0.1, 0.1, 1.0);
+            gl::Clear(gl::COLOR_BUFFER_BIT);
+            gl::Disable(gl::BLEND);
+
+            if let Some(vp) = self_.viewport() {
+                gl::Viewport(vp.x, vp.y, vp.width, vp.height);
+                self_.texture_blit(false);
+            }
+        }
+
+        self_.gl_area().queue_draw();
     }
 
     fn set_alternative_text(&self, alt_text: &str) {

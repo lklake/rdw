@@ -214,6 +214,12 @@ mod imp {
                             }
                         }));
 
+                        dpy.connect_gl_draw(clone!(@weak obj => move |dpy, x, y, w, h| {
+                            log::debug!("gl-draw: {:?}", (x, y, w, h));
+                            obj.render();
+                            dpy.gl_draw_done();
+                        }));
+
                         dpy.connect_property_monitors_notify(clone!(@weak obj => move |dpy| {
                             let self_ = Self::from_instance(&obj);
                             let monitors = dpy.get_property_monitors();
@@ -227,13 +233,6 @@ mod imp {
                                 }
                             }
                             self_.monitor_config.set(monitor_config);
-                        }));
-
-                        dpy.connect_gl_draw(clone!(@weak obj => move |dpy, x, y, w, h| {
-                            //let self_ = Self::from_instance(&obj);
-                            log::debug!("gl-draw: {:?}", (x, y, w, h));
-
-                            dpy.gl_draw_done();
                         }));
 
                         spice::ChannelExt::connect(&dpy);
