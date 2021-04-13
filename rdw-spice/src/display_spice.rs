@@ -245,9 +245,10 @@ mod imp {
                             obj.set_cursor_position(Some((x as _, y as _)));
                         }));
 
-                        cursor.connect_cursor_reset(|_cursor| {
+                        cursor.connect_cursor_reset(clone!(@weak obj => move |_cursor| {
                             log::debug!("cursor-reset");
-                        });
+                            obj.define_cursor(None);
+                        }));
 
                         cursor.connect_cursor_hide(clone!(@weak obj => move |_cursor| {
                             log::debug!("cursor-hide");
