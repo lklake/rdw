@@ -67,6 +67,7 @@ pub mod imp {
         pub(crate) grab_shortcut: OnceCell<gtk::ShortcutTrigger>,
         pub(crate) grabbed: Cell<Grab>,
         pub(crate) shortcuts_inhibited_id: Cell<Option<SignalHandlerId>>,
+        pub(crate) grab_ec: glib::WeakRef<gtk::EventControllerKey>,
 
         pub(crate) texture_id: Cell<GLuint>,
         pub(crate) texture_blit_vao: Cell<GLuint>,
@@ -259,6 +260,16 @@ pub mod imp {
                 if let Some((x, y)) = self_.transform_pos(x, y) {
                     widget.emit_by_name("motion", &[&x, &y]).unwrap();
                 }
+            }));
+            ec.connect_enter(clone!(@weak widget => move |_, x, y| {
+                let self_ = Self::from_instance(&widget);
+                if let Some((x, y)) = self_.transform_pos(x, y) {
+                    widget.emit_by_name("motion", &[&x, &y]).unwrap();
+                }
+            }));
+            ec.connect_leave(clone!(@weak widget => move |_| {
+                let self_ = Self::from_instance(&widget);
+                self_.ungrab_keyboard();
             }));
 
             let ec = gtk::GestureClick::new();
@@ -490,23 +501,32 @@ pub mod imp {
             Ok(())
         }
 
-        fn ungrab_keyboard(&self, ec: &gtk::EventControllerKey) {
+        fn ungrab_keyboard(&self) {
             let display = self.get_instance();
 
-            if self.grabbed.get().contains(Grab::KEYBOARD) {
-                //display.remove_controller(ec); here crashes badly
-                glib::idle_add_local(clone!(@weak ec, @weak display => @default-panic, move || {
-                    let self_ = Self::from_instance(&display);
-                    if let Some(widget) = ec.get_widget() {
-                        widget.remove_controller(&ec);
-                    }
-                    if let Some(toplevel) = self_.get_toplevel() {
-                        // will also notify the grab change
-                        toplevel.restore_system_shortcuts();
-                    }
-                    glib::Continue(false)
-                }));
+            if !self.grabbed.get().contains(Grab::KEYBOARD) {
+                return;
             }
+
+            //display.remove_controller(ec); here crashes badly
+            glib::idle_add_local(clone!(@weak display => @default-panic, move || {
+                let self_ = Self::from_instance(&display);
+                match self_.grab_ec.upgrade() {
+                    Some(ec) => {
+                        if let Some(widget) = ec.get_widget() {
+                            widget.remove_controller(&ec);
+                        }
+                        self_.grab_ec.set(None);
+                    },
+                    _ => log::debug!("No grab event-controller?"),
+                };
+                if let Some(toplevel) = self_.get_toplevel() {
+                    toplevel.restore_system_shortcuts();
+                    self_.grabbed.set(self_.grabbed.get() - Grab::KEYBOARD);
+                    display.notify("grabbed");
+                }
+                glib::Continue(false)
+            }));
         }
 
         pub(crate) fn ungrab_mouse(&self) {
@@ -536,7 +556,7 @@ pub mod imp {
                     if self.grabbed.get().is_empty() {
                         self.try_grab();
                     } else {
-                        self.ungrab_keyboard(ec);
+                        self.ungrab_keyboard();
                         self.ungrab_mouse();
                     }
                     return;
@@ -584,6 +604,7 @@ pub mod imp {
             if let Some(root) = obj.get_root() {
                 root.add_controller(&ec);
             }
+            self.grab_ec.set(Some(&ec));
 
             let id = toplevel.connect_property_shortcuts_inhibited_notify(
                 clone!(@weak obj => @default-panic, move |toplevel| {
@@ -593,8 +614,7 @@ pub mod imp {
                         let self_ = Self::from_instance(&obj);
                         let id = self_.shortcuts_inhibited_id.take();
                         toplevel.disconnect(id.unwrap());
-                        self_.grabbed.set(self_.grabbed.get() - Grab::KEYBOARD);
-                        obj.notify("grabbed");
+                        self_.ungrab_keyboard();
                     }
                 }),
             );
