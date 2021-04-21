@@ -102,7 +102,7 @@ fn vnc_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
             glib::MainContext::default().spawn_local(run_dialog);
         }));
 
-    vnc.upcast::<_>()
+    vnc.upcast()
 }
 
 fn spice_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
@@ -129,7 +129,7 @@ fn spice_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
     }));
 
     session.connect();
-    spice.upcast::<_>()
+    spice.upcast()
 }
 
 fn make_display(app: &gtk::Application, mut uri: String) -> rdw::Display {
