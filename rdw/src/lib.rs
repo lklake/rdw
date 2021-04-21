@@ -1,4 +1,4 @@
-use gtk::glib::{self, gflags, GEnum};
+use gtk::glib::{gflags, GEnum};
 
 mod display;
 mod egl;

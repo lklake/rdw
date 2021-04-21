@@ -196,7 +196,7 @@ fn main() {
         let uri = cl
             .options_dict()
             .lookup_value(&glib::OPTION_REMAINING, None)
-            .and_then(|args| args.get_child_value(0).get::<String>())
+            .and_then(|args| args.child_value(0).get::<String>())
             .unwrap_or_else(|| "vnc://localhost".to_string());
         let display = make_display(app, uri);
         dpy.replace(Some(display));

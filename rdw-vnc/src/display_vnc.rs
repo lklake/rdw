@@ -370,7 +370,7 @@ mod imp {
             self.do_framebuffer_init();
 
             fn pixbuf_supports(fmt: &str) -> bool {
-                gtk::gdk_pixbuf::Pixbuf::get_formats()
+                gtk::gdk_pixbuf::Pixbuf::formats()
                     .iter()
                     .any(|f| f.name().map_or(false, |name| name.as_str() == fmt))
             }
