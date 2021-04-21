@@ -369,11 +369,11 @@ mod imp {
 
             self.do_framebuffer_init();
 
-            fn pixbuf_supports(fmt: &str) -> bool {
+            let pixbuf_supports = |fmt| {
                 gtk::gdk_pixbuf::Pixbuf::formats()
                     .iter()
                     .any(|f| f.name().map_or(false, |name| name.as_str() == fmt))
-            }
+            };
 
             if pixbuf_supports("jpeg") {
                 if !self.allow_lossy {
