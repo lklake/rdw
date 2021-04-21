@@ -205,10 +205,10 @@ mod imp {
                     log::debug!("framebuffer-update: {:?}", (x, y, w, h));
                     if let Some(fb) = &*self_.fb.borrow() {
                         let sub = fb.get_sub(
-                            x.try_into().unwrap(),
-                            y.try_into().unwrap(),
-                            w.try_into().unwrap(),
-                            h.try_into().unwrap()
+                            x as _,
+                            y as _,
+                            w as _,
+                            h as _,
                         );
                         obj.update_area(x, y, w, h, (fb.width() * 4).into(), sub);
                     }
@@ -223,7 +223,7 @@ mod imp {
                     let self_ = Self::from_instance(&obj);
                     log::debug!("desktop-resize: {:?}", (w, h));
                     self_.do_framebuffer_init();
-                    obj.set_display_size(Some((w.try_into().unwrap(), h.try_into().unwrap())));
+                    obj.set_display_size(Some((w as _, h as _)));
                     if let Err(e) = self_.framebuffer_update_request(false) {
                         log::warn!("Failed to update framebuffer: {}", e);
                     }
@@ -314,11 +314,7 @@ mod imp {
         fn do_framebuffer_init(&self) {
             let remote_format = self.connection.pixel_format().unwrap();
             let (width, height) = (self.connection.width(), self.connection.height());
-            let fb = Framebuffer::new(
-                width.try_into().unwrap(),
-                height.try_into().unwrap(),
-                &remote_format,
-            );
+            let fb = Framebuffer::new(width as _, height as _, &remote_format);
             self.connection.set_framebuffer(&fb).unwrap();
             self.fb.replace(Some(fb));
         }
@@ -328,8 +324,8 @@ mod imp {
                 incremental,
                 0,
                 0,
-                self.connection.width().try_into().unwrap(),
-                self.connection.height().try_into().unwrap(),
+                self.connection.width() as _,
+                self.connection.height() as _,
             )
         }
 
@@ -377,15 +373,15 @@ mod imp {
 
             if pixbuf_supports("jpeg") {
                 if !self.allow_lossy {
-                    enc.retain(|x| *x != TightJpeg5);
+                    enc.retain(|&x| x != TightJpeg5);
                 }
             } else {
-                enc.retain(|x| *x != TightJpeg5);
-                enc.retain(|x| *x != Tight);
+                enc.retain(|&x| x != TightJpeg5);
+                enc.retain(|&x| x != Tight);
             }
 
             if self.keycode_map {
-                enc.retain(|x| *x != ExtKeyEvent);
+                enc.retain(|&x| x != ExtKeyEvent);
             }
 
             let enc: Vec<i32> = enc.into_iter().map(|x| x.to_glib()).collect();
