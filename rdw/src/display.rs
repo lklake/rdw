@@ -952,6 +952,8 @@ pub trait DisplayExt: 'static {
 
     fn set_cursor_position(&self, pos: Option<(u32, u32)>);
 
+    fn grab_shortcut(&self) -> &gtk::ShortcutTrigger;
+
     fn grabbed(&self) -> Grab;
 
     fn update_area(&self, x: i32, y: i32, w: i32, h: i32, stride: i32, data: &[u8]);
@@ -1058,6 +1060,13 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
 
         self_.cursor_position.set(pos);
         self.queue_draw();
+    }
+
+    fn grab_shortcut(&self) -> &gtk::ShortcutTrigger {
+        // Safety: safe because IsA<Display>
+        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
+
+        self_.grab_shortcut.get().unwrap()
     }
 
     fn grabbed(&self) -> Grab {
