@@ -3,7 +3,7 @@ use std::{cell::RefCell, sync::Arc};
 
 use gio::ApplicationFlags;
 use glib::{clone, translate::ToGlib};
-use gtk::{gio, glib, prelude::*};
+use gtk::{gdk, gio, glib, prelude::*};
 use rdw::DisplayExt;
 use rdw_spice::spice::{self, ChannelExt};
 use rdw_vnc::{gvnc, rdw};
@@ -214,7 +214,7 @@ fn main() {
         display.connect_property_grabbed_notify(clone!(@weak window => move |d| {
             let mut title = "rdw demo".to_string();
             if !d.grabbed().is_empty() {
-                title = format!("{} - grabbed {:?}", title, d.grabbed())
+                title = format!("{} - {}", title, d.grab_shortcut().to_label(&gdk::Display::default().unwrap()))
             }
             window.set_title(Some(title.as_str()));
         }));
