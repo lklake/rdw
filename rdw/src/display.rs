@@ -16,7 +16,7 @@ use wayland_protocols::unstable::relative_pointer::v1::client::zwp_relative_poin
 use crate::{egl, error::Error, util, DmabufScanout, Grab, KeyEvent, Scroll};
 
 pub mod imp {
-    use std::cell::RefCell;
+    use std::{cell::RefCell, time::Duration};
 
     use super::*;
     use glib::subclass::Signal;
@@ -64,6 +64,8 @@ pub mod imp {
         pub(crate) cursor_position: Cell<Option<(u32, u32)>>,
         // press-and-release detection time in ms
         pub(crate) synthesize_delay: Cell<u32>,
+        pub(crate) last_key_press: Cell<Option<(u32, u32)>>,
+        pub(crate) last_key_press_timeout: Cell<Option<SourceId>>,
 
         // the shortcut to ungrab key/mouse (to be configurable and extended with ctrl-alt)
         pub(crate) grab_shortcut: OnceCell<gtk::ShortcutTrigger>,
@@ -162,7 +164,7 @@ pub mod imp {
                         u32::MIN,
                         u32::MAX,
                         100,
-                        glib::ParamFlags::READWRITE,
+                        glib::ParamFlags::READWRITE | glib::ParamFlags::CONSTRUCT,
                     ),
                 ]
             });
@@ -392,7 +394,7 @@ pub mod imp {
                 glib::source_remove(timeout_id);
             }
             self.resize_timeout_id.set(Some(glib::timeout_add_local(
-                std::time::Duration::from_millis(500),
+                Duration::from_millis(500),
                 clone!(@weak widget => @default-return glib::Continue(false), move || {
                     let self_ = Self::from_instance(&widget);
                     let sf = widget.scale_factor() as u32;
@@ -582,6 +584,20 @@ pub mod imp {
             }
         }
 
+        fn emit_last_key_press(&self) {
+            let display = self.instance();
+
+            if let Some((keyval, keycode)) = self.last_key_press.take() {
+                display
+                    .emit_by_name("key-event", &[&keyval, &keycode, &KeyEvent::PRESS])
+                    .unwrap();
+            }
+
+            if let Some(timeout_id) = self.last_key_press_timeout.take() {
+                glib::source_remove(timeout_id);
+            }
+        }
+
         fn key_pressed(&self, ec: &gtk::EventControllerKey, keyval: gdk::keys::Key, keycode: u32) {
             let display = self.instance();
 
@@ -597,13 +613,44 @@ pub mod imp {
                 }
             }
 
-            display
-                .emit_by_name("key-event", &[&*keyval, &keycode, &KeyEvent::PRESS])
-                .unwrap();
+            // flush pending key event
+            self.emit_last_key_press();
+
+            // synthesize press-and-release if within the synthesize-delay boundary, else emit
+            self.last_key_press.set(Some((*keyval, keycode)));
+            self.last_key_press_timeout
+                .set(Some(glib::timeout_add_local(
+                    Duration::from_millis(self.synthesize_delay.get() as _),
+                    glib::clone!(@weak display => @default-return glib::Continue(false), move || {
+                        let self_ = Self::from_instance(&display);
+                        self_.emit_last_key_press();
+                        glib::Continue(false)
+                    }),
+                )));
         }
 
         fn key_released(&self, keyval: gdk::keys::Key, keycode: u32) {
             let display = self.instance();
+
+            if let Some((last_keyval, last_keycode)) = self.last_key_press.get() {
+                if (last_keyval, last_keycode) == (*keyval, keycode) {
+                    self.last_key_press.set(None);
+                    if let Some(timeout_id) = self.last_key_press_timeout.take() {
+                        glib::source_remove(timeout_id);
+                    }
+
+                    display
+                        .emit_by_name(
+                            "key-event",
+                            &[&*keyval, &keycode, &(KeyEvent::PRESS | KeyEvent::RELEASE)],
+                        )
+                        .unwrap();
+                    return;
+                }
+            }
+
+            // flush pending key event
+            self.emit_last_key_press();
 
             display
                 .emit_by_name("key-event", &[&*keyval, &keycode, &KeyEvent::RELEASE])
