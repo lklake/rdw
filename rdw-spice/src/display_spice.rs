@@ -70,13 +70,14 @@ mod imp {
                 let self_ = Self::from_instance(&obj);
                 log::debug!("key-event: {:?}", (event, keyval, keycode));
                 // TODO: get the correct keymap according to gdk display type
-                if let Some(xt) = KEYMAP_XORGEVDEV2XTKBD.get(keycode as usize) {
+                if let Some(&xt) = KEYMAP_XORGEVDEV2XTKBD.get(keycode as usize) {
                     if let Some(input) = self_.input.upgrade() {
-                        if event.contains(rdw::KeyEvent::PRESS) {
-                            input.key_press(*xt as _);
-                        }
-                        if event.contains(rdw::KeyEvent::RELEASE) {
-                            input.key_release(*xt as _);
+                        if event.contains(rdw::KeyEvent::PRESS|rdw::KeyEvent::RELEASE) {
+                            input.key_press_and_release(xt as _)
+                        } else if event.contains(rdw::KeyEvent::PRESS) {
+                            input.key_press(xt as _);
+                        } else if event.contains(rdw::KeyEvent::RELEASE) {
+                            input.key_release(xt as _);
                         }
                     }
                 }
