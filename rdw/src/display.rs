@@ -62,6 +62,8 @@ pub mod imp {
         pub(crate) mouse_absolute: Cell<bool>,
         // position of cursor when drawn by client
         pub(crate) cursor_position: Cell<Option<(u32, u32)>>,
+        // press-and-release detection time in ms
+        pub(crate) synthesize_delay: Cell<u32>,
 
         // the shortcut to ungrab key/mouse (to be configurable and extended with ctrl-alt)
         pub(crate) grab_shortcut: OnceCell<gtk::ShortcutTrigger>,
@@ -144,16 +146,51 @@ pub mod imp {
 
         fn properties() -> &'static [glib::ParamSpec] {
             static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
-                vec![glib::ParamSpec::new_flags(
-                    "grabbed",
-                    "grabbed",
-                    "Grabbed",
-                    Grab::static_type(),
-                    Grab::empty().to_glib(),
-                    glib::ParamFlags::READABLE,
-                )]
+                vec![
+                    glib::ParamSpec::new_flags(
+                        "grabbed",
+                        "grabbed",
+                        "Grabbed",
+                        Grab::static_type(),
+                        Grab::empty().to_glib(),
+                        glib::ParamFlags::READABLE,
+                    ),
+                    glib::ParamSpec::new_uint(
+                        "synthesize-delay",
+                        "Synthesize delay",
+                        "Press-and-release synthesize maximum time in ms",
+                        u32::MIN,
+                        u32::MAX,
+                        100,
+                        glib::ParamFlags::READWRITE,
+                    ),
+                ]
             });
             PROPERTIES.as_ref()
+        }
+
+        fn set_property(
+            &self,
+            _obj: &Self::Type,
+            _id: usize,
+            value: &glib::Value,
+            pspec: &glib::ParamSpec,
+        ) {
+            match pspec.name() {
+                "synthesize-delay" => {
+                    let delay = value.get().unwrap().unwrap();
+                    self.synthesize_delay.set(delay);
+                }
+                _ => unimplemented!(),
+            }
+        }
+
+        fn property(&self, obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+            match pspec.name() {
+                "grabbed" => obj.grabbed().to_value(),
+                "synthesize-delay" => self.synthesize_delay.get().to_value(),
+                _ => unimplemented!(),
+            }
         }
 
         fn signals() -> &'static [Signal] {
