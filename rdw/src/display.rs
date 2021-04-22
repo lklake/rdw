@@ -133,8 +133,9 @@ pub mod imp {
             gl_area.set_parent(obj);
             self.gl_area.set(gl_area).unwrap();
 
-            self.grab_shortcut
-                .get_or_init(|| gtk::ShortcutTrigger::parse_string("<ctrl><alt>g").unwrap());
+            self.grab_shortcut.get_or_init(|| {
+                gtk::ShortcutTrigger::parse_string("<Ctrl>Alt_L|<Alt>Control_L").unwrap()
+            });
         }
 
         fn dispose(&self, obj: &Self::Type) {
