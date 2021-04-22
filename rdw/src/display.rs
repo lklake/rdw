@@ -13,7 +13,7 @@ use wayland_protocols::unstable::relative_pointer::v1::client::zwp_relative_poin
     Event as RelEvent, ZwpRelativePointerV1,
 };
 
-use crate::{egl, error::Error, util, DmabufScanout, Grab, Scroll};
+use crate::{egl, error::Error, util, DmabufScanout, Grab, KeyEvent, Scroll};
 
 pub mod imp {
     use std::cell::RefCell;
@@ -160,15 +160,12 @@ pub mod imp {
             static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
                 vec![
                     Signal::builder(
-                        "key-press",
-                        &[u32::static_type().into(), u32::static_type().into()],
-                        <()>::static_type().into(),
-                    )
-                    .flags(glib::SignalFlags::ACTION)
-                    .build(),
-                    Signal::builder(
-                        "key-release",
-                        &[u32::static_type().into(), u32::static_type().into()],
+                        "key-event",
+                        &[
+                            u32::static_type().into(),
+                            u32::static_type().into(),
+                            KeyEvent::static_type().into(),
+                        ],
                         <()>::static_type().into(),
                     )
                     .flags(glib::SignalFlags::ACTION)
@@ -564,7 +561,7 @@ pub mod imp {
             }
 
             display
-                .emit_by_name("key-press", &[&*keyval, &keycode])
+                .emit_by_name("key-event", &[&*keyval, &keycode, &KeyEvent::PRESS])
                 .unwrap();
         }
 
@@ -572,7 +569,7 @@ pub mod imp {
             let display = self.instance();
 
             display
-                .emit_by_name("key-release", &[&*keyval, &keycode])
+                .emit_by_name("key-event", &[&*keyval, &keycode, &KeyEvent::RELEASE])
                 .unwrap();
         }
 
@@ -880,9 +877,10 @@ pub trait DisplayExt: 'static {
 
     fn set_alternative_text(&self, alt_text: &str);
 
-    fn connect_key_press<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId;
-
-    fn connect_key_release<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId;
+    fn connect_key_event<F: Fn(&Self, u32, u32, KeyEvent) + 'static>(
+        &self,
+        f: F,
+    ) -> SignalHandlerId;
 
     fn connect_motion<F: Fn(&Self, f64, f64) + 'static>(&self, f: F) -> SignalHandlerId;
 
@@ -1106,11 +1104,15 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         self.update_property(&[(gtk::AccessibleProperty::Description, &alt_text)]);
     }
 
-    fn connect_key_press<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId {
-        unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, u32, u32) + 'static>(
+    fn connect_key_event<F: Fn(&Self, u32, u32, KeyEvent) + 'static>(
+        &self,
+        f: F,
+    ) -> SignalHandlerId {
+        unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, u32, u32, KeyEvent) + 'static>(
             this: *mut imp::RdwDisplay,
             keyval: u32,
             keycode: u32,
+            event: KeyEvent,
             f: glib::ffi::gpointer,
         ) where
             P: IsA<Display>,
@@ -1120,40 +1122,14 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
                 &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
                 keyval,
                 keycode,
+                event,
             )
         }
         unsafe {
             let f: Box<F> = Box::new(f);
             glib::signal::connect_raw(
                 self.as_ptr() as *mut glib::gobject_ffi::GObject,
-                b"key-press\0".as_ptr() as *const _,
-                Some(std::mem::transmute(connect_trampoline::<Self, F> as usize)),
-                Box::into_raw(f),
-            )
-        }
-    }
-
-    fn connect_key_release<F: Fn(&Self, u32, u32) + 'static>(&self, f: F) -> SignalHandlerId {
-        unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, u32, u32) + 'static>(
-            this: *mut imp::RdwDisplay,
-            keyval: u32,
-            keycode: u32,
-            f: glib::ffi::gpointer,
-        ) where
-            P: IsA<Display>,
-        {
-            let f = &*(f as *const F);
-            f(
-                &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
-                keyval,
-                keycode,
-            )
-        }
-        unsafe {
-            let f: Box<F> = Box::new(f);
-            glib::signal::connect_raw(
-                self.as_ptr() as *mut glib::gobject_ffi::GObject,
-                b"key-release\0".as_ptr() as *const _,
+                b"key-event\0".as_ptr() as *const _,
                 Some(std::mem::transmute(connect_trampoline::<Self, F> as usize)),
                 Box::into_raw(f),
             )

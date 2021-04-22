@@ -79,16 +79,15 @@ mod imp {
 
             obj.set_mouse_absolute(true);
 
-            obj.connect_key_press(clone!(@weak obj => move |_, keyval, keycode| {
+            obj.connect_key_event(clone!(@weak obj => move |_, keyval, keycode, event| {
                 let self_ = Self::from_instance(&obj);
                 log::debug!("key-press: {:?}", (keyval, keycode));
-                self_.key_event(true, keyval, keycode);
-            }));
-
-            obj.connect_key_release(clone!(@weak obj => move |_, keyval, keycode| {
-                let self_ = Self::from_instance(&obj);
-                log::debug!("key-release: {:?}", (keyval, keycode));
-                self_.key_event(false, keyval, keycode);
+                if event.contains(rdw::KeyEvent::PRESS) {
+                    self_.key_event(true, keyval, keycode);
+                }
+                if event.contains(rdw::KeyEvent::RELEASE) {
+                    self_.key_event(false, keyval, keycode);
+                }
             }));
 
             obj.connect_motion(clone!(@weak obj => move |_, x, y| {

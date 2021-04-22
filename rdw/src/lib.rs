@@ -18,6 +18,13 @@ pub enum Scroll {
     Right,
 }
 
+#[gflags("KeyEvent")]
+#[repr(C)] // See https://github.com/bitflags/bitflags/pull/187
+pub enum KeyEvent {
+    PRESS = 0b0000_0001,
+    RELEASE = 0b0000_0010,
+}
+
 #[gflags("RdwGrab")]
 #[repr(C)]
 pub enum Grab {

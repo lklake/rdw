@@ -66,24 +66,18 @@ mod imp {
 
             obj.set_mouse_absolute(true);
 
-            obj.connect_key_press(clone!(@weak obj => move |_, keyval, keycode| {
+            obj.connect_key_event(clone!(@weak obj => move |_, keyval, keycode, event| {
                 let self_ = Self::from_instance(&obj);
-                log::debug!("key-press: {:?}", (keyval, keycode));
+                log::debug!("key-event: {:?}", (event, keyval, keycode));
                 // TODO: get the correct keymap according to gdk display type
                 if let Some(xt) = KEYMAP_XORGEVDEV2XTKBD.get(keycode as usize) {
                     if let Some(input) = self_.input.upgrade() {
-                        input.key_press(*xt as _);
-                    }
-                }
-            }));
-
-            obj.connect_key_release(clone!(@weak obj => move |_, keyval, keycode| {
-                let self_ = Self::from_instance(&obj);
-                log::debug!("key-release: {:?}", (keyval, keycode));
-                // TODO: get the correct keymap according to gdk display type
-                if let Some(xt) = KEYMAP_XORGEVDEV2XTKBD.get(keycode as usize) {
-                    if let Some(input) = self_.input.upgrade() {
-                        input.key_release(*xt as _);
+                        if event.contains(rdw::KeyEvent::PRESS) {
+                            input.key_press(*xt as _);
+                        }
+                        if event.contains(rdw::KeyEvent::RELEASE) {
+                            input.key_release(*xt as _);
+                        }
                     }
                 }
             }));
