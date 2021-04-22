@@ -148,15 +148,24 @@ pub mod imp {
         }
 
         fn properties() -> &'static [glib::ParamSpec] {
+            use glib::ParamFlags as Flags;
+
             static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
                 vec![
+                    glib::ParamSpec::new_object(
+                        "grab-shortcut",
+                        "Grab shortcut",
+                        "Input devices grab/ungrab shortcut",
+                        gtk::ShortcutTrigger::static_type(),
+                        Flags::READWRITE,
+                    ),
                     glib::ParamSpec::new_flags(
                         "grabbed",
                         "grabbed",
                         "Grabbed",
                         Grab::static_type(),
                         Grab::empty().to_glib(),
-                        glib::ParamFlags::READABLE,
+                        Flags::READABLE,
                     ),
                     glib::ParamSpec::new_uint(
                         "synthesize-delay",
@@ -165,7 +174,7 @@ pub mod imp {
                         u32::MIN,
                         u32::MAX,
                         100,
-                        glib::ParamFlags::READWRITE | glib::ParamFlags::CONSTRUCT,
+                        Flags::READWRITE | Flags::CONSTRUCT,
                     ),
                 ]
             });
@@ -180,6 +189,10 @@ pub mod imp {
             pspec: &glib::ParamSpec,
         ) {
             match pspec.name() {
+                "grab-shortcut" => {
+                    let shortcut = value.get().unwrap().unwrap();
+                    self.grab_shortcut.set(shortcut).unwrap();
+                }
                 "synthesize-delay" => {
                     let delay = value.get().unwrap().unwrap();
                     self.synthesize_delay.set(delay);
@@ -190,6 +203,7 @@ pub mod imp {
 
         fn property(&self, obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
             match pspec.name() {
+                "grab-shortcut" => obj.grab_shortcut().to_value(),
                 "grabbed" => obj.grabbed().to_value(),
                 "synthesize-delay" => self.synthesize_delay.get().to_value(),
                 _ => unimplemented!(),
