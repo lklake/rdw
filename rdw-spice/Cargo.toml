@@ -14,3 +14,4 @@ gtk = { package = "gtk4", git = "https://github.com/gtk-rs/gtk4-rs" }
 spice-client-glib = { git = "https://gitlab.gnome.org/malureau/spice-gtk-rs.git" }
 rdw = { path = "../rdw" }
 keycodemap = { path = "../keycodemap" }
+futures = "0.3.13"

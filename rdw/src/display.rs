@@ -164,7 +164,7 @@ pub mod imp {
                         "grabbed",
                         "Grabbed",
                         Grab::static_type(),
-                        Grab::empty().to_glib(),
+                        Grab::empty().into_glib(),
                         Flags::READABLE,
                     ),
                     glib::ParamSpec::new_uint(
@@ -190,11 +190,11 @@ pub mod imp {
         ) {
             match pspec.name() {
                 "grab-shortcut" => {
-                    let shortcut = value.get().unwrap().unwrap();
+                    let shortcut = value.get().unwrap();
                     self.grab_shortcut.set(shortcut).unwrap();
                 }
                 "synthesize-delay" => {
-                    let delay = value.get().unwrap().unwrap();
+                    let delay = value.get().unwrap();
                     self.synthesize_delay.set(delay);
                 }
                 _ => unimplemented!(),
@@ -373,29 +373,23 @@ pub mod imp {
             _widget: &Self::Type,
             orientation: gtk::Orientation,
             _for_size: i32,
-            min: &mut i32,
-            nat: &mut i32,
-            _min_base: &mut i32,
-            _nat_base: &mut i32,
-        ) {
-            // TODO: this is not working as expected yet..
-            match self.display_size.get() {
-                Some((w, h)) => match orientation {
+        ) -> (i32, i32, i32, i32) {
+            let (minimum, mut natural, minimum_baseline, natural_baseline) = (128, 128, -1, -1);
+
+            // TODO: doesn't work as expected yet
+            if let Some((w, h)) = self.display_size.get() {
+                match orientation {
                     gtk::Orientation::Horizontal => {
-                        *min = 128;
-                        *nat = w as _;
+                        natural = w as _;
                     }
                     gtk::Orientation::Vertical => {
-                        *min = 128;
-                        *nat = h as _;
+                        natural = h as _;
                     }
                     _ => panic!(),
-                },
-                None => {
-                    *min = 0;
-                    *nat = 0;
                 }
             }
+
+            (minimum, natural, minimum_baseline, natural_baseline)
         }
 
         fn size_allocate(&self, widget: &Self::Type, width: i32, height: i32, baseline: i32) {

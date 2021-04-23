@@ -1,10 +1,12 @@
 use gtk::glib::{gflags, GEnum};
 
+mod content_provider;
 mod display;
 mod egl;
 mod error;
 mod util;
 
+pub use content_provider::ContentProvider;
 pub use display::*;
 pub use egl::DmabufScanout;
 

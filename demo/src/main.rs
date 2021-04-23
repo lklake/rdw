@@ -2,10 +2,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::{cell::RefCell, sync::Arc};
 
 use gio::ApplicationFlags;
-use glib::{clone, translate::ToGlib};
+use glib::{clone, translate::IntoGlib};
 use gtk::{gdk, gio, glib, prelude::*};
 use rdw::DisplayExt;
-use rdw_spice::spice::{self, ChannelExt};
+use rdw_spice::spice::{self, prelude::*};
 use rdw_vnc::{gvnc, rdw};
 
 fn show_error(app: gtk::Application, msg: &str) {
@@ -56,7 +56,7 @@ fn vnc_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
         .connect_vnc_auth_credential(clone!(@weak app => move |conn, va|{
             use gvnc::ConnectionCredential::*;
 
-            let creds: Vec<_> = va.iter().map(|v| v.get_some::<gvnc::ConnectionCredential>().unwrap()).collect();
+            let creds: Vec<_> = va.iter().map(|v| v.get::<gvnc::ConnectionCredential>().unwrap()).collect();
             let mut dialog = gtk::MessageDialogBuilder::new()
                 .modal(true)
                 .buttons(gtk::ButtonsType::Ok)
@@ -88,13 +88,13 @@ fn vnc_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
             let run_dialog = clone!(@weak conn, @strong username, @strong password => async move {
                 dialog.run_future().await;
                 if creds.contains(&Username) {
-                    conn.set_credential(Username.to_glib(), &username.text()).unwrap();
+                    conn.set_credential(Username.into_glib(), &username.text()).unwrap();
                 }
                 if creds.contains(&Password) {
-                    conn.set_credential(Password.to_glib(), &password.text()).unwrap();
+                    conn.set_credential(Password.into_glib(), &password.text()).unwrap();
                 }
                 if creds.contains(&Clientname) {
-                    conn.set_credential(Clientname.to_glib(), "rdw-vnc").unwrap();
+                    conn.set_credential(Clientname.into_glib(), "rdw-vnc").unwrap();
                 }
                 dialog.destroy();
             });

@@ -1,15 +1,16 @@
 use std::convert::TryFrom;
 
-use glib::{clone, subclass::prelude::*};
+use glib::{clone, signal::SignalHandlerId, subclass::prelude::*};
 use gtk::{gdk, gio, glib, prelude::*};
 use keycodemap::KEYMAP_XORGEVDEV2XTKBD;
 use rdw::DisplayExt;
-use spice::ChannelExt;
+use spice::prelude::*;
 use spice_client_glib as spice;
 use std::os::unix::io::IntoRawFd;
 
 mod imp {
-    use std::cell::Cell;
+    use crate::util;
+    use std::cell::{Cell, RefCell};
 
     use super::*;
     use gtk::subclass::prelude::*;
@@ -40,7 +41,18 @@ mod imp {
         type Type = DisplaySpice;
     }
 
-    #[derive(Debug, Default)]
+    #[derive(Default)]
+    pub(crate) struct Clipboard {
+        pub(crate) watch_id: Cell<Option<SignalHandlerId>>,
+        pub(crate) tx: RefCell<
+            Option<(
+                spice::ClipboardFormat,
+                futures::channel::mpsc::Sender<glib::Bytes>,
+            )>,
+        >,
+    }
+
+    #[derive(Default)]
     pub struct DisplaySpice {
         pub(crate) session: spice::Session,
         pub(crate) monitor_config: Cell<Option<spice::DisplayMonitorConfig>>,
@@ -49,6 +61,7 @@ mod imp {
         pub(crate) display: glib::WeakRef<spice::DisplayChannel>,
         pub(crate) last_button_state: Cell<Option<i32>>,
         pub(crate) nth_monitor: usize,
+        pub(crate) clipboard: [Clipboard; 2],
     }
 
     #[glib::object_subclass]
@@ -151,10 +164,112 @@ mod imp {
                                 self_.session.disconnect();
                             }
                         }));
+
                         main.connect_main_mouse_update(clone!(@weak obj => move |main| {
                             let mode = spice::MouseMode::from_bits_truncate(main.mouse_mode());
                             log::debug!("mouse-update: {:?}", mode);
                             obj.set_mouse_absolute(mode.contains(spice::MouseMode::CLIENT));
+                        }));
+
+                        main.connect_main_clipboard_selection(clone!(@weak obj => move |_main, selection, type_, data| {
+                            let self_ = Self::from_instance(&obj);
+                            log::debug!("clipboard-data: {:?}", (selection, type_, data.len()));
+                            if let Some((req_type, mut tx)) = self_.clipboard[selection as usize].tx.take() {
+                                if type_ != req_type as u32 {
+                                    log::warn!("Didn't get expected type from guest clipboard!");
+                                    return;
+                                }
+                                if let Err(e) = tx.try_send(glib::Bytes::from(data)) {
+                                    log::warn!("Failed to send clipboard data to future: {}", e);
+                                }
+                            }
+                        }));
+
+                        main.connect_main_clipboard_selection_grab(clone!(@weak obj => move |_main, selection, types| {
+                            let self_ = Self::from_instance(&obj);
+                            let types: Vec<_> = types.iter()
+                                                     .filter_map(|&t| spice::ClipboardFormat::try_from(t as i32).ok())
+                                                     .filter_map(|f| util::mime_from_format(f))
+                                                     .collect();
+                            log::debug!("clipboard-grab: {:?}", (selection, &types));
+                            if let Some(clipboard) = self_.clipboard_from_selection(selection) {
+                                let content = rdw::ContentProvider::new(&types, clone!(@weak obj => @default-return None, move |mime, stream, prio| {
+                                    log::debug!("content-provider-write: {:?}", (mime, stream));
+                                    let format = match util::format_from_mime(mime) {
+                                        Some(f) => f,
+                                        None => return None,
+                                    };
+
+                                    Some(Box::pin(clone!(@weak obj, @strong stream => @default-return panic!(), async move {
+                                        use futures::stream::StreamExt;
+
+                                        let self_ = Self::from_instance(&obj);
+                                        if self_.clipboard[selection as usize].tx.borrow().is_some() {
+                                            return Err(glib::Error::new(gio::IOErrorEnum::Failed, "clipboard request pending"));
+                                        }
+
+                                        if let Some(main) = self_.main.upgrade() {
+                                            let (tx, mut rx) = futures::channel::mpsc::channel(1);
+                                            self_.clipboard[selection as usize].tx.replace(Some((format, tx)));
+                                            main.clipboard_selection_request(selection, format as u32);
+                                            if let Some(bytes) = rx.next().await {
+                                                return stream.write_bytes_async_future(&bytes, prio).await.map(|_| ());
+                                            }
+                                        }
+
+                                        Err(glib::Error::new(gio::IOErrorEnum::Failed, "failed to request clipboard data"))
+                                    })))
+                                }));
+                                if let Err(e) = clipboard.set_content(Some(&content)) {
+                                    log::warn!("Failed to set clipboard grab: {}", e);
+                                }
+                            }
+                        }));
+
+                        main.connect_main_clipboard_selection_release(clone!(@weak obj => move |_main, selection| {
+                            let self_ = Self::from_instance(&obj);
+                            log::debug!("clipboard-release: {:?}", selection);
+                            if let Some(clipboard) = self_.clipboard_from_selection(selection) {
+                                if let Err(e) = clipboard.set_content(gdk::NONE_CONTENT_PROVIDER) {
+                                    log::warn!("Failed to release clipboard: {}", e);
+                                }
+                            }
+                        }));
+
+                        main.connect_main_clipboard_selection_request(clone!(@weak obj => @default-return false, move |main, selection, type_| {
+                            let self_ = Self::from_instance(&obj);
+                            let mime = spice::ClipboardFormat::try_from(type_ as i32).map_or(None, |f| util::mime_from_format(f));
+                            log::debug!("clipboard-request: {:?}", (selection, mime));
+
+                            if let (Some(mime), Some(clipboard)) = (mime, self_.clipboard_from_selection(selection)) {
+                                glib::MainContext::default().spawn_local(glib::clone!(@weak obj, @weak clipboard, @strong main => async move {
+                                    let res = clipboard.read_async_future(&[mime], glib::Priority::default()).await;
+                                    log::debug!("clipboard-read: {:?}", res);
+
+                                    if let Ok((stream, mime)) = res {
+                                        if let Some(format) = util::format_from_mime(&mime) {
+                                            let out = gio::MemoryOutputStream::new_resizable();
+                                            let res = out.splice_async_future(
+                                                &stream,
+                                                gio::OutputStreamSpliceFlags::CLOSE_SOURCE | gio::OutputStreamSpliceFlags::CLOSE_TARGET,
+                                                glib::Priority::default()).await;
+                                            match res {
+                                                Ok(size) => {
+                                                    let data = out.steal_as_bytes();
+                                                    main.clipboard_selection_notify(selection, format as u32, data.as_ref());
+                                                    log::debug!("clipboard-sent: {}", size);
+                                                    return;
+                                                }
+                                                Err(e) => {
+                                                    log::warn!("Failed to read clipboard: {}", e);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    main.clipboard_selection_notify(selection, 0, &[]);
+                                }));
+                            }
+                            true
                         }));
                     },
                     Inputs => {
@@ -170,7 +285,7 @@ mod imp {
                                 }
                             }));
                         }));
-                        spice::ChannelExt::connect(&input);
+                        ChannelExt::connect(&input);
                     }
                     Display => {
                         let dpy = channel.clone().downcast::<spice::DisplayChannel>().unwrap();
@@ -232,7 +347,7 @@ mod imp {
                             self_.monitor_config.set(monitor_config);
                         }));
 
-                        spice::ChannelExt::connect(&dpy);
+                        ChannelExt::connect(&dpy);
                     },
                     Cursor => {
                         let cursor = channel.clone().downcast::<spice::CursorChannel>().unwrap();
@@ -263,8 +378,8 @@ mod imp {
                                             cursor.data().unwrap(),
                                             cursor.width(),
                                             cursor.height(),
-                                            cursor.hot_x(),
-                                            cursor.hot_y(),
+                                            0,
+                                            0,
                                             obj.scale_factor()
                                         );
                                         obj.define_cursor(Some(cursor));
@@ -274,19 +389,85 @@ mod imp {
                             }
                         }));
 
-                        spice::ChannelExt::connect(&cursor);
+                        ChannelExt::connect(&cursor);
                     }
                     _ => {}
                 }
             }));
         }
+
+        fn dispose(&self, _obj: &Self::Type) {
+            if let Some(id) = self.clipboard[0].watch_id.take() {
+                let clipboard = self.clipboard_from_selection(0).unwrap();
+                clipboard.disconnect(id);
+            }
+            if let Some(id) = self.clipboard[1].watch_id.take() {
+                let clipboard = self.clipboard_from_selection(1).unwrap();
+                clipboard.disconnect(id);
+            }
+        }
     }
 
-    impl WidgetImpl for DisplaySpice {}
+    impl WidgetImpl for DisplaySpice {
+        fn realize(&self, widget: &Self::Type) {
+            self.parent_realize(widget);
+
+            self.add_clipboard_watch(0);
+            self.add_clipboard_watch(1);
+        }
+    }
 
     impl rdw::DisplayImpl for DisplaySpice {}
 
     impl DisplaySpice {
+        fn add_clipboard_watch(&self, selection: u32) {
+            let obj = self.instance();
+
+            let clipboard = self.clipboard_from_selection(selection).unwrap();
+            let watch_id = clipboard.connect_changed(clone!(@weak obj => move |clipboard| {
+                let self_ = Self::from_instance(&obj);
+                let is_local = clipboard.is_local();
+                match (is_local, self_.main.upgrade(), clipboard.formats()) {
+                    (false, Some(main), Some(formats)) => {
+                        let mut types = formats.mime_types()
+                                               .iter()
+                                               .filter_map(|m| util::format_from_mime(m))
+                                               .map(|f| f as u32)
+                                               .collect::<Vec<_>>();
+                        types.sort();
+                        types.dedup();
+                        if !types.is_empty() {
+                            log::debug!(">clipboard-grab({}): {:?}", selection, types);
+                            main.clipboard_selection_grab(selection, &types);
+                        }
+                    }
+                    _ => ()
+                }
+            }));
+
+            self.clipboard[selection as usize]
+                .watch_id
+                .set(Some(watch_id));
+        }
+
+        fn clipboard_from_selection(&self, selection: u32) -> Option<gdk::Clipboard> {
+            let obj = self.instance();
+
+            match selection {
+                0 => Some(obj.clone().upcast::<gtk::Widget>().display().clipboard()),
+                1 => Some(
+                    obj.clone()
+                        .upcast::<gtk::Widget>()
+                        .display()
+                        .primary_clipboard(),
+                ),
+                _ => {
+                    log::warn!("Unsupport clipboard selection: {}", selection);
+                    None
+                }
+            }
+        }
+
         fn button_event(&self, press: bool, button: spice::MouseButton) {
             assert_ne!(button, spice::MouseButton::Invalid);
 

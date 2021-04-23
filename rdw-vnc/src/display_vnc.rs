@@ -1,6 +1,6 @@
 use glib::{clone, subclass::prelude::*, translate::*};
 use gtk::{glib, prelude::*};
-use gvnc::FramebufferExt;
+use gvnc::prelude::*;
 
 use keycodemap::KEYMAP_XORGEVDEV2QNUM;
 use rdw::DisplayExt;
@@ -153,10 +153,11 @@ mod imp {
                     Vencrypt, Tls, // Then stackable auth types in order of preference
                     Sasl, Mslogonii, Mslogon, Ard, Vnc, None, // Or nothing at all
                 ];
-                for auth in &prefer_auth {
+                for &auth in &prefer_auth {
                     for a in va.iter() {
-                        if a.get::<gvnc::ConnectionAuth>().unwrap() == Some(*auth) {
-                            if let Err(e) = conn.set_auth_type(auth.to_glib().try_into().unwrap()) {
+                        if a.get::<gvnc::ConnectionAuth>().unwrap() == auth {
+                            if let Err(e) = conn.set_auth_type(auth.into_glib().try_into().unwrap())
+                            {
                                 log::warn!("Failed to set auth type: {}", e);
                                 conn.shutdown();
                             }
@@ -209,7 +210,7 @@ mod imp {
                             w as _,
                             h as _,
                         );
-                        obj.update_area(x, y, w, h, (fb.width() * 4).into(), sub);
+                        obj.update_area(x, y, w, h, (BaseFramebufferExt::width(fb) * 4).into(), sub);
                     }
                     if let Err(e) = self_.framebuffer_update_request(true) {
                         log::warn!("Failed to update framebuffer: {}", e);
@@ -383,7 +384,7 @@ mod imp {
                 enc.retain(|&x| x != ExtKeyEvent);
             }
 
-            let enc: Vec<i32> = enc.into_iter().map(|x| x.to_glib()).collect();
+            let enc: Vec<i32> = enc.into_iter().map(|x| x.into_glib()).collect();
             self.connection.set_encodings(&enc)?;
 
             self.framebuffer_update_request(false)?;

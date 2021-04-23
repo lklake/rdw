@@ -2,7 +2,8 @@ use glib::translate::ToGlibPtrMut;
 use gtk::prelude::*;
 use gtk::{glib, subclass::prelude::ObjectSubclassExt};
 
-use gvnc::{subclass::base_framebuffer::*, FramebufferExt};
+use gvnc::prelude::*;
+use gvnc::subclass::base_framebuffer::*;
 
 mod imp {
     use super::*;
@@ -74,7 +75,7 @@ impl Framebuffer {
     pub fn get_sub(&self, x: usize, y: usize, w: usize, h: usize) -> &[u8] {
         let self_ = imp::Framebuffer::from_instance(self);
         let buf = self_.buffer.get().unwrap();
-        let bw: usize = self.width().into();
+        let bw: usize = FramebufferExt::width(self) as _;
         let start = (x + y * bw) * 4;
         let end = (x + w + (y + h - 1) * bw) * 4;
         &buf[start..end]
