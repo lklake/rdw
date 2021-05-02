@@ -299,9 +299,11 @@ mod imp {
                             log::debug!("primary-destroy");
                         });
 
-                        dpy.connect_display_mark(|_, mark| {
+                        dpy.connect_display_mark(clone!(@weak obj => move |_, mark| {
+                            let self_ = Self::from_instance(&obj);
                             log::debug!("primary-mark: {}", mark);
-                        });
+                            self_.invalidate_monitor();
+                        }));
 
                         dpy.connect_display_invalidate(clone!(@weak obj => move |_, x, y, w, h| {
                             let self_ = Self::from_instance(&obj);
@@ -340,9 +342,6 @@ mod imp {
                             let monitor_config = monitors.and_then(|m| m.get(self_.nth_monitor).copied());
                             if let Some((0, 0, w, h)) = monitor_config.map(|c| c.geometry()) {
                                 obj.set_display_size(Some((w, h)));
-                                if self_.primary().is_some() {
-                                    self_.invalidate(0, 0, w, h);
-                                }
                             }
                             self_.monitor_config.set(monitor_config);
                         }));
@@ -527,6 +526,13 @@ mod imp {
                     .upgrade()
                     .and_then(|d| d.primary(c.surface_id()))
             })
+        }
+
+        fn invalidate_monitor(&self) {
+            if let Some(c) = self.monitor_config.get() {
+                let (x, y, w, h) = c.geometry();
+                self.invalidate(x, y, w, h);
+            }
         }
 
         fn invalidate(&self, x: usize, y: usize, w: usize, h: usize) {
