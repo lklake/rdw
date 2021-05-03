@@ -77,7 +77,7 @@ pub mod imp {
         pub(crate) texture_blit_vao: Cell<GLuint>,
         pub(crate) texture_blit_prog: Cell<GLuint>,
         pub(crate) texture_blit_flip_prog: Cell<GLuint>,
-        pub(crate) dmabuf: Cell<Option<DmabufScanout>>,
+        pub(crate) dmabuf: RefCell<Option<DmabufScanout>>,
 
         pub(crate) wl_source: Cell<Option<glib::SourceId>>,
         pub(crate) wl_rel_manager: OnceCell<wayland_client::Main<ZwpRelativePointerManagerV1>>,
@@ -800,8 +800,7 @@ pub mod imp {
         pub(crate) fn texture_blit(&self, flip: bool) {
             unsafe {
                 gl::UseProgram(if flip {
-                    todo!();
-                    //self.texture_blit_flip_prog.get()
+                    self.texture_blit_flip_prog.get()
                 } else {
                     self.texture_blit_prog.get()
                 });
@@ -1108,6 +1107,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
             );
         }
 
+        self_.dmabuf.replace(None);
         self_.gl_area().queue_render();
     }
 
@@ -1174,7 +1174,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
             egl_image_target(gl::TEXTURE_2D, img.as_ptr() as gl::types::GLeglImageOES);
         }
 
-        self_.dmabuf.set(Some(s));
+        self_.dmabuf.replace(Some(s));
 
         if let Err(e) = egl.destroy_image(egl_dpy, img) {
             log::warn!("eglDestroyImage() failed: {}", e);
@@ -1195,7 +1195,8 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
 
             if let Some(vp) = self_.viewport() {
                 gl::Viewport(vp.x, vp.y, vp.width, vp.height);
-                self_.texture_blit(false);
+                let flip = self_.dmabuf.borrow().as_ref().map_or(false, |d| d.y0_top);
+                self_.texture_blit(flip);
             }
         }
 
