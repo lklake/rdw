@@ -696,7 +696,7 @@ pub mod imp {
             }
             self.grab_ec.set(Some(&ec));
 
-            let id = toplevel.connect_property_shortcuts_inhibited_notify(
+            let id = toplevel.connect_shortcuts_inhibited_notify(
                 clone!(@weak obj => @default-panic, move |toplevel| {
                     let inhibited = toplevel.is_shortcuts_inhibited();
                     log::debug!("shortcuts-inhibited: {}", inhibited);
