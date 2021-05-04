@@ -12,6 +12,7 @@ use wayland_protocols::unstable::relative_pointer::v1::client::zwp_relative_poin
 use wayland_protocols::unstable::relative_pointer::v1::client::zwp_relative_pointer_v1::{
     Event as RelEvent, ZwpRelativePointerV1,
 };
+use x11::xlib;
 
 use crate::{egl, error::Error, util, DmabufScanout, Grab, KeyEvent, Scroll};
 
@@ -73,6 +74,12 @@ pub mod imp {
         pub(crate) shortcuts_inhibited_id: Cell<Option<SignalHandlerId>>,
         pub(crate) grab_ec: glib::WeakRef<gtk::EventControllerKey>,
 
+        // Option, because None means failed to init
+        pub(crate) egl_dpy: OnceCell<Option<egl::Display>>,
+        pub(crate) egl_ctx: OnceCell<egl::Context>,
+        pub(crate) egl_cfg: OnceCell<egl::Config>,
+        pub(crate) egl_surf: OnceCell<egl::Surface>,
+
         pub(crate) texture_id: Cell<GLuint>,
         pub(crate) texture_blit_vao: Cell<GLuint>,
         pub(crate) texture_blit_prog: Cell<GLuint>,
@@ -125,12 +132,12 @@ pub mod imp {
             gl_area.connect_realize(clone!(@weak obj => move |_| {
                 let self_ = Self::from_instance(&obj);
                 if let Err(e) = unsafe { self_.realize_gl() } {
+                    log::warn!("Failed to realize gl: {}", e);
                     let e = glib::Error::new(Error::GL, &e);
                     self_.gl_area().set_error(Some(&e));
                 }
             }));
 
-            gl_area.set_parent(obj);
             self.gl_area.set(gl_area).unwrap();
 
             self.grab_shortcut.get_or_init(|| {
@@ -284,6 +291,14 @@ pub mod imp {
             widget.set_sensitive(true);
             widget.set_focusable(true);
             widget.set_focus_on_click(true);
+
+            if self.realize_egl() {
+                if let Err(e) = unsafe { self.realize_gl() } {
+                    log::warn!("Failed to realize GL: {}", e);
+                }
+            } else {
+                self.gl_area().set_parent(widget);
+            }
 
             if let Ok(dpy) = widget.display().downcast::<gdk_wl::WaylandDisplay>() {
                 self.realize_wl(&dpy);
@@ -457,7 +472,64 @@ pub mod imp {
         }
     }
 
+    pub(crate) struct ContextGuard<'a>(&'a Display);
+
+    impl Drop for ContextGuard<'_> {
+        fn drop(&mut self) {
+            self.0.clear_current();
+        }
+    }
+
     impl Display {
+        pub(crate) fn clear_current(&self) {
+            if let (Some(dpy), Some(_)) = (self.egl_display(), self.egl_surface()) {
+                let _ = egl::egl().make_current(dpy, None, None, None);
+            }
+        }
+
+        pub(crate) fn make_current(&self) -> ContextGuard {
+            if let (Some(dpy), surf, Some(ctx)) =
+                (self.egl_display(), self.egl_surface(), self.egl_context())
+            {
+                gdk::GLContext::clear_current();
+                if let Err(e) = egl::egl().make_current(dpy, surf, surf, Some(ctx)) {
+                    log::warn!("Failed to make current context: {}", e);
+                }
+            } else {
+                let area = self.gl_area();
+                area.make_current();
+                area.attach_buffers();
+            }
+            ContextGuard(self)
+        }
+
+        fn realize_egl(&self) -> bool {
+            // necessary on X11 to have an EGL context for dmabuf imports
+            if let (Some(dpy), Some(_), Some(xid)) =
+                (self.egl_display(), self.egl_context(), self.x11_xid())
+            {
+                match unsafe {
+                    egl::egl().create_window_surface(
+                        dpy,
+                        *self.egl_cfg.get().expect("egl config missing"),
+                        xid as _,
+                        None,
+                    )
+                } {
+                    Ok(surf) => {
+                        log::debug!("Initialized EGL surface successfully");
+                        self.egl_surf.set(surf).unwrap();
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to create egl surface: {}", e);
+                    }
+                }
+                true
+            } else {
+                false
+            }
+        }
+
         fn realize_wl(&self, dpy: &gdk_wl::WaylandDisplay) {
             let display = unsafe {
                 WlDisplay::from_external_display(dpy.wl_display().as_ref().c_ptr() as *mut _)
@@ -495,8 +567,7 @@ pub mod imp {
 
         unsafe fn realize_gl(&self) -> Result<(), String> {
             use std::ffi::CString;
-
-            self.gl_area().make_current();
+            let _ctxt = self.make_current();
 
             let texture_blit_vs = CString::new(include_str!("texture-blit.vert")).unwrap();
             let texture_blit_flip_vs =
@@ -888,13 +959,32 @@ pub mod imp {
             display.native().and_then(|n| n.surface())
         }
 
+        fn egl_surface(&self) -> Option<egl::Surface> {
+            self.egl_surf.get().map(|s| *s)
+        }
+
         fn wl_surface(&self) -> Option<wayland_client::protocol::wl_surface::WlSurface> {
             self.surface()
                 .and_then(|s| s.downcast::<gdk_wl::WaylandSurface>().ok())
                 .map(|w| w.wl_surface())
         }
 
+        fn x11_xid(&self) -> Option<xlib::Window> {
+            self.surface()
+                .and_then(|s| s.downcast::<gdk_x11::X11Surface>().ok())
+                .map(|s| s.xid())
+        }
+
+        pub(crate) fn egl_context(&self) -> Option<egl::Context> {
+            self.egl_display()
+                .and_then(|_| self.egl_ctx.get().map(|c| *c))
+        }
+
         pub(crate) fn egl_display(&self) -> Option<egl::Display> {
+            *self.egl_dpy.get_or_init(|| self.egl_display_init())
+        }
+
+        pub(crate) fn egl_display_init(&self) -> Option<egl::Display> {
             let widget = self.instance();
             let egl = egl::egl();
 
@@ -904,9 +994,50 @@ pub mod imp {
             }
 
             if let Ok(dpy) = widget.display().downcast::<gdk_x11::X11Display>() {
-                let _dpy =
-                    unsafe { gdk_x11::ffi::gdk_x11_display_get_xdisplay(dpy.to_glib_none().0) };
-                log::warn!("X11: unsupported display kind, todo");
+                let xdpy = unsafe { dpy.xdisplay() };
+                let dpy = match egl.get_display(xdpy as _) {
+                    Some(dpy) => dpy,
+                    _ => return None,
+                };
+                if let Err(e) = egl::egl().initialize(dpy) {
+                    log::warn!("Failed to initialize egl: {}", e);
+                    return None;
+                }
+                if let Err(e) = egl::egl().bind_api(egl::OPENGL_API) {
+                    log::warn!("Failed to bind OpenGL API: {}", e);
+                    return None;
+                }
+                let attrib_list = [
+                    egl::RED_SIZE,
+                    8,
+                    egl::GREEN_SIZE,
+                    8,
+                    egl::BLUE_SIZE,
+                    8,
+                    egl::NONE,
+                ];
+                let config = match egl::egl().choose_first_config(dpy, &attrib_list) {
+                    Ok(Some(config)) => config,
+                    Err(e) => {
+                        log::warn!("Failed to choose the egl config: {}", e);
+                        return None;
+                    }
+                    _ => {
+                        log::warn!("Failed to choose the egl config");
+                        return None;
+                    }
+                };
+                let attrib_list = [egl::CONTEXT_MAJOR_VERSION, 3, egl::NONE];
+                match egl::egl().create_context(dpy, config, None, &attrib_list) {
+                    Ok(ctx) => {
+                        self.egl_ctx.set(ctx).unwrap();
+                        self.egl_cfg.set(config).unwrap();
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to create egl context: {}", e);
+                    }
+                }
+                return Some(dpy);
             };
 
             None
@@ -1010,7 +1141,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
             return;
         }
 
-        self_.gl_area().make_current();
+        let _ctx = self_.make_current();
         if let Some((width, height)) = size {
             unsafe {
                 gl::BindTexture(gl::TEXTURE_2D, self_.texture_id());
@@ -1086,7 +1217,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
     fn update_area(&self, x: i32, y: i32, w: i32, h: i32, stride: i32, data: &[u8]) {
         // Safety: safe because IsA<Display>
         let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
-        self_.gl_area().make_current();
+        let _ctx = self_.make_current();
 
         // TODO: check data boundaries
         unsafe {
@@ -1114,7 +1245,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
     fn set_dmabuf_scanout(&self, s: DmabufScanout) {
         // Safety: safe because IsA<Display>
         let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
-        self_.gl_area().make_current();
+        let _ctx = self_.make_current();
 
         let egl = egl::egl();
         let egl_image_target = match egl::image_target_texture_2d_oes() {
@@ -1184,9 +1315,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
     fn render(&self) {
         // Safety: safe because IsA<Display>
         let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
-
-        self_.gl_area().make_current();
-        self_.gl_area().attach_buffers();
+        let _ctx = self_.make_current();
 
         unsafe {
             gl::ClearColor(0.1, 0.1, 0.1, 1.0);
