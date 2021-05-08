@@ -311,7 +311,7 @@ mod imp {
                             self_.invalidate(x as _, y as _, w as _, h as _);
                         }));
 
-                        dpy.connect_property_gl_scanout_notify(clone!(@weak obj => move |dpy| {
+                        dpy.connect_gl_scanout_notify(clone!(@weak obj => move |dpy| {
                             let scanout = dpy.gl_scanout();
                             log::debug!("notify::gl-scanout: {:?}", scanout);
 
@@ -334,7 +334,7 @@ mod imp {
                             dpy.gl_draw_done();
                         }));
 
-                        dpy.connect_property_monitors_notify(clone!(@weak obj => move |dpy| {
+                        dpy.connect_monitors_notify(clone!(@weak obj => move |dpy| {
                             let self_ = Self::from_instance(&obj);
                             let monitors = dpy.monitors();
                             log::debug!("notify::monitors: {:?}", monitors);
@@ -367,7 +367,7 @@ mod imp {
                             obj.define_cursor(cursor);
                         }));
 
-                        cursor.connect_property_cursor_notify(clone!(@weak obj => move |cursor| {
+                        cursor.connect_cursor_notify(clone!(@weak obj => move |cursor| {
                             let cursor = cursor.cursor();
                             log::debug!("cursor-notify: {:?}", cursor);
                             if let Some(cursor) = cursor {
