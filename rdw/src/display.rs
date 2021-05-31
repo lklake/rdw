@@ -426,7 +426,7 @@ pub mod imp {
                     let height = height as u32 * sf;
                     let mm = self_.surface()
                                    .as_ref()
-                                   .and_then(|s| widget.display().monitor_at_surface(s))
+                                   .and_then(|s| gdk::traits::DisplayExt::monitor_at_surface(&widget.display(), s))
                                    .map(|m| {
                                        let (geom, wmm, hmm) = (m.geometry(), m.width_mm() as u32, m.height_mm() as u32);
                                        (wmm * width / (geom.width as u32), hmm * height / geom.height as u32)
@@ -837,7 +837,7 @@ pub mod imp {
                 return false;
             }
 
-            let default_seat = obj.display().default_seat();
+            let default_seat = gdk::traits::DisplayExt::default_seat(&obj.display());
 
             for device in default_seat.devices(gdk::SeatCapabilities::POINTER) {
                 self.try_grab_device(device);

@@ -453,13 +453,12 @@ mod imp {
             let obj = self.instance();
 
             match selection {
-                0 => Some(obj.clone().upcast::<gtk::Widget>().display().clipboard()),
-                1 => Some(
-                    obj.clone()
-                        .upcast::<gtk::Widget>()
-                        .display()
-                        .primary_clipboard(),
-                ),
+                0 => Some(gdk::traits::DisplayExt::clipboard(
+                    &obj.upcast::<gtk::Widget>().display(),
+                )),
+                1 => Some(gdk::traits::DisplayExt::primary_clipboard(
+                    &obj.upcast::<gtk::Widget>().display(),
+                )),
                 _ => {
                     log::warn!("Unsupport clipboard selection: {}", selection);
                     None
