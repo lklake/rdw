@@ -960,7 +960,7 @@ pub mod imp {
         }
 
         fn egl_surface(&self) -> Option<egl::Surface> {
-            self.egl_surf.get().map(|s| *s)
+            self.egl_surf.get().copied()
         }
 
         fn wl_surface(&self) -> Option<wayland_client::protocol::wl_surface::WlSurface> {
@@ -976,8 +976,7 @@ pub mod imp {
         }
 
         pub(crate) fn egl_context(&self) -> Option<egl::Context> {
-            self.egl_display()
-                .and_then(|_| self.egl_ctx.get().map(|c| *c))
+            self.egl_display().and_then(|_| self.egl_ctx.get().copied())
         }
 
         pub(crate) fn egl_display(&self) -> Option<egl::Display> {

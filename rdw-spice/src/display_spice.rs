@@ -189,7 +189,7 @@ mod imp {
                             let self_ = Self::from_instance(&obj);
                             let types: Vec<_> = types.iter()
                                                      .filter_map(|&t| spice::ClipboardFormat::try_from(t as i32).ok())
-                                                     .filter_map(|f| util::mime_from_format(f))
+                                                     .filter_map(util::mime_from_format)
                                                      .collect();
                             log::debug!("clipboard-grab: {:?}", (selection, &types));
                             if let Some(clipboard) = self_.clipboard_from_selection(selection) {
@@ -238,7 +238,7 @@ mod imp {
 
                         main.connect_main_clipboard_selection_request(clone!(@weak obj => @default-return false, move |main, selection, type_| {
                             let self_ = Self::from_instance(&obj);
-                            let mime = spice::ClipboardFormat::try_from(type_ as i32).map_or(None, |f| util::mime_from_format(f));
+                            let mime = spice::ClipboardFormat::try_from(type_ as i32).map_or(None, util::mime_from_format);
                             log::debug!("clipboard-request: {:?}", (selection, mime));
 
                             if let (Some(mime), Some(clipboard)) = (mime, self_.clipboard_from_selection(selection)) {
@@ -426,21 +426,18 @@ mod imp {
             let watch_id = clipboard.connect_changed(clone!(@weak obj => move |clipboard| {
                 let self_ = Self::from_instance(&obj);
                 let is_local = clipboard.is_local();
-                match (is_local, self_.main.upgrade(), clipboard.formats()) {
-                    (false, Some(main), Some(formats)) => {
-                        let mut types = formats.mime_types()
-                                               .iter()
-                                               .filter_map(|m| util::format_from_mime(m))
-                                               .map(|f| f as u32)
-                                               .collect::<Vec<_>>();
-                        types.sort();
-                        types.dedup();
-                        if !types.is_empty() {
-                            log::debug!(">clipboard-grab({}): {:?}", selection, types);
-                            main.clipboard_selection_grab(selection, &types);
-                        }
+                if let (false, Some(main), Some(formats)) = (is_local, self_.main.upgrade(), clipboard.formats()) {
+                    let mut types = formats.mime_types()
+                                           .iter()
+                                           .filter_map(|m| util::format_from_mime(m))
+                                           .map(|f| f as u32)
+                                           .collect::<Vec<_>>();
+                    types.sort_unstable();
+                    types.dedup();
+                    if !types.is_empty() {
+                        log::debug!(">clipboard-grab({}): {:?}", selection, types);
+                        main.clipboard_selection_grab(selection, &types);
                     }
-                    _ => ()
                 }
             }));
 

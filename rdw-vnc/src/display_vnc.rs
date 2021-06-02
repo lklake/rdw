@@ -210,7 +210,7 @@ mod imp {
                             w as _,
                             h as _,
                         );
-                        obj.update_area(x, y, w, h, (BaseFramebufferExt::width(fb) * 4).into(), sub);
+                        obj.update_area(x, y, w, h, BaseFramebufferExt::width(fb) * 4, sub);
                     }
                     if let Err(e) = self_.framebuffer_update_request(true) {
                         log::warn!("Failed to update framebuffer: {}", e);
