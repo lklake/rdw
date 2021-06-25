@@ -1,3 +1,4 @@
+use gdk_wl::prelude::*;
 use gl::types::*;
 use glib::{clone, signal::SignalHandlerId, subclass::prelude::*, translate::*, SourceId};
 use gtk::{gdk, glib, graphene, prelude::*, subclass::prelude::WidgetImpl};
@@ -1505,7 +1506,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
             P: IsA<Display>,
         {
             let f: &F = &*(f as *const F);
-            f(&Display::from_glib_borrow(this).unsafe_cast_ref())
+            f(Display::from_glib_borrow(this).unsafe_cast_ref())
         }
         unsafe {
             let f: Box<F> = Box::new(f);

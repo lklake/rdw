@@ -1,4 +1,4 @@
-use gtk::glib::{gflags, GEnum};
+use gtk::glib::{self, gflags, GEnum};
 
 mod content_provider;
 mod display;

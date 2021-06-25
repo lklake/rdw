@@ -71,7 +71,7 @@ pub mod imp {
             stream: &gio::OutputStream,
             io_priority: glib::Priority,
         ) -> Pin<Box<dyn Future<Output = Result<(), glib::Error>> + 'static>> {
-            let self_ = Self::from_instance(&provider);
+            let self_ = Self::from_instance(provider);
             let future = self_.write_future.get().unwrap()(mime_type, stream, io_priority);
             future.unwrap_or_else(|| {
                 Box::pin(async move {
