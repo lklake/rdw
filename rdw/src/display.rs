@@ -658,7 +658,7 @@ pub mod imp {
                 }
                 self.grabbed.set(self.grabbed.get() - Grab::MOUSE);
                 if !display.mouse_absolute() {
-                    display.set_cursor(None);
+                    self.gl_area().set_cursor(None);
                 }
                 display.queue_draw(); // update cursor
                 display.notify("grabbed");
@@ -857,7 +857,7 @@ pub mod imp {
                 grabbed |= Grab::MOUSE;
                 if !display.mouse_absolute() {
                     // hide client mouse
-                    display.set_cursor_from_name(Some("none"));
+                    self.gl_area().set_cursor_from_name(Some("none"));
                 }
                 display.queue_draw(); // update cursor
             }
@@ -1168,7 +1168,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
 
         if self.mouse_absolute() {
-            self.set_cursor(cursor.as_ref());
+            self_.gl_area().set_cursor(cursor.as_ref());
         }
         self_.cursor.replace(cursor);
     }
@@ -1186,7 +1186,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
 
         if absolute {
             self_.ungrab_mouse();
-            self.set_cursor(self_.cursor.borrow().as_ref());
+            self_.gl_area().set_cursor(self_.cursor.borrow().as_ref());
         }
 
         self_.mouse_absolute.set(absolute);
