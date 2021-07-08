@@ -12,3 +12,8 @@ exclude = [
 ]
 
 default-members = ["demo"]
+
+[patch."https://github.com/gtk-rs/gtk4-rs"]
+gdk4-wayland = { path = '/home/elmarco/src/gtk4-rs/gdk4-wayland' }
+gdk4-x11 = { path = '/home/elmarco/src/gtk4-rs/gdk4-x11' }
+gtk4 = { path = '/home/elmarco/src/gtk4-rs/gtk4' }
