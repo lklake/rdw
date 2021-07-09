@@ -25,6 +25,9 @@ gl = "0.14.0"
 wayland-protocols = { version = "0.28.5", features = ["unstable_protocols", "client"] }
 wayland-client = "0.28.5"
 x11 = "2.18.2"
+gst = { package = "gstreamer", version = "0.16.7" }
+gst-app = { package = "gstreamer-app", version = "0.16.5" }
+gst-audio = { package = "gstreamer-audio", version = "0.16.5" }
 
 [package.metadata.capi.header]
 generation = false

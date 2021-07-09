@@ -4,11 +4,13 @@ mod content_provider;
 mod display;
 mod egl;
 mod error;
+mod gstaudio;
 mod util;
 
 pub use content_provider::ContentProvider;
 pub use display::*;
 pub use egl::DmabufScanout;
+pub use gstaudio::*;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy, GEnum)]
 #[genum(type_name = "RdwScroll")]
