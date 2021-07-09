@@ -76,7 +76,6 @@ pub mod imp {
         pub(crate) grab_ec: glib::WeakRef<gtk::EventControllerKey>,
 
         // Option, because None means failed to init
-        pub(crate) egl_dpy: OnceCell<Option<egl::Display>>,
         pub(crate) egl_ctx: OnceCell<egl::Context>,
         pub(crate) egl_cfg: OnceCell<egl::Config>,
         pub(crate) egl_surf: OnceCell<egl::Surface>,
@@ -981,63 +980,14 @@ pub mod imp {
         }
 
         pub(crate) fn egl_display(&self) -> Option<egl::Display> {
-            *self.egl_dpy.get_or_init(|| self.egl_display_init())
-        }
-
-        pub(crate) fn egl_display_init(&self) -> Option<egl::Display> {
             let widget = self.instance();
-            let egl = egl::egl();
 
             if let Ok(dpy) = widget.display().downcast::<gdk_wl::WaylandDisplay>() {
-                let wl_dpy = dpy.wl_display();
-                return egl.get_display(wl_dpy.as_ref().c_ptr() as _);
+                return dpy.egl_display();
             }
 
             if let Ok(dpy) = widget.display().downcast::<gdk_x11::X11Display>() {
-                let xdpy = unsafe { dpy.xdisplay() };
-                let dpy = match egl.get_display(xdpy as _) {
-                    Some(dpy) => dpy,
-                    _ => return None,
-                };
-                if let Err(e) = egl::egl().initialize(dpy) {
-                    log::warn!("Failed to initialize egl: {}", e);
-                    return None;
-                }
-                if let Err(e) = egl::egl().bind_api(egl::OPENGL_API) {
-                    log::warn!("Failed to bind OpenGL API: {}", e);
-                    return None;
-                }
-                let attrib_list = [
-                    egl::RED_SIZE,
-                    8,
-                    egl::GREEN_SIZE,
-                    8,
-                    egl::BLUE_SIZE,
-                    8,
-                    egl::NONE,
-                ];
-                let config = match egl::egl().choose_first_config(dpy, &attrib_list) {
-                    Ok(Some(config)) => config,
-                    Err(e) => {
-                        log::warn!("Failed to choose the egl config: {}", e);
-                        return None;
-                    }
-                    _ => {
-                        log::warn!("Failed to choose the egl config");
-                        return None;
-                    }
-                };
-                let attrib_list = [egl::CONTEXT_MAJOR_VERSION, 3, egl::NONE];
-                match egl::egl().create_context(dpy, config, None, &attrib_list) {
-                    Ok(ctx) => {
-                        self.egl_ctx.set(ctx).unwrap();
-                        self.egl_cfg.set(config).unwrap();
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to create egl context: {}", e);
-                    }
-                }
-                return Some(dpy);
+                return dpy.egl_display();
             };
 
             None

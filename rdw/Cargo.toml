@@ -17,8 +17,8 @@ once_cell = "1.5"
 derivative = "2.2.0"
 libc = { version = "0.2.92" }
 gtk = { package = "gtk4", git = "https://github.com/gtk-rs/gtk4-rs" }
-gdk-wl = { package = "gdk4-wayland", git = "https://github.com/gtk-rs/gtk4-rs" }
-gdk-x11 = { package = "gdk4-x11", git = "https://github.com/gtk-rs/gtk4-rs" }
+gdk-wl = { package = "gdk4-wayland", git = "https://github.com/gtk-rs/gtk4-rs", features = ["v4_4"] }
+gdk-x11 = { package = "gdk4-x11", git = "https://github.com/gtk-rs/gtk4-rs", features = ["v4_4"] }
 libloading = "0.7.0"
 khronos-egl = { version = "4.1.0", features = ["dynamic"] }
 gl = "0.14.0"
