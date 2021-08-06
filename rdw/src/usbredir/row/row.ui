@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <template class="Row" parent="GtkWidget">
+    <property name="layout-manager">
+      <object class="GtkBinLayout"/>
+    </property>
+    <child>
+      <object class="GtkBox">
+        <child>
+          <object class="GtkLabel" id="label">
+            <property name="label">Label</property>
+            <property name="xalign">0</property>
+            <property name="halign">start</property>
+            <property name="valign">center</property>
+            <property name="hexpand">1</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkSwitch" id="switch">
+            <property name="halign">end</property>
+            <property name="valign">center</property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+</interface>

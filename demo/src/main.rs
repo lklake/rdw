@@ -204,13 +204,50 @@ fn main() {
         -1
     });
 
+    let action_quit = gio::SimpleAction::new("quit", None);
+    action_quit.connect_activate(clone!(@weak app => move |_, _| {
+        app.quit();
+    }));
+    app.add_action(&action_quit);
+
+    let action_usb = gio::SimpleAction::new("usb", None);
+    let dpy = display.clone();
+    action_usb.connect_activate(clone!(@weak app => move |_, _| {
+        let display = match &*dpy.borrow() {
+            Some(display) => display.clone(),
+            _ => return,
+        };
+
+        if let Ok(spice) = display.downcast::<rdw_spice::Display>() {
+            let usbredir = match rdw_spice::UsbRedir::build(spice.session()) {
+                Ok(it) => it,
+                Err(e) => {
+                    panic!("Failed to open USB dialog: {}", e);
+                }
+            };
+            let dialog = gtk::Dialog::new();
+            dialog.set_child(Some(&usbredir));
+            dialog.show();
+        }
+    }));
+    app.add_action(&action_usb);
+
     app.connect_activate(move |app| {
-        let window = gtk::ApplicationWindow::new(app);
+        build_ui(app, display.clone());
+    });
+    app.run();
+}
 
-        window.set_title(Some("rdw demo"));
-        window.set_default_size(1024, 768);
+fn build_ui(app: &gtk::Application, display: Arc<RefCell<Option<rdw::Display>>>) {
+    let ui_src = include_str!("demo.ui");
+    let builder = gtk::Builder::new();
+    builder
+        .add_from_string(ui_src)
+        .expect("Couldn't add from string");
+    let window: gtk::ApplicationWindow = builder.object("window").expect("Couldn't get window");
+    window.set_application(Some(app));
 
-        let display = display.take().unwrap();
+    if let Some(display) = &*display.borrow() {
         display.connect_property_grabbed_notify(clone!(@weak window => move |d| {
             let mut title = "rdw demo".to_string();
             if !d.grabbed().is_empty() {
@@ -219,10 +256,8 @@ fn main() {
             window.set_title(Some(title.as_str()));
         }));
 
-        window.set_child(Some(&display));
+        window.set_child(Some(display));
+    }
 
-        window.show();
-    });
-
-    app.run();
+    window.show();
 }
