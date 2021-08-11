@@ -16,33 +16,33 @@ mod imp {
     use gtk::subclass::prelude::*;
 
     #[repr(C)]
-    pub struct RdwDisplayVncClass {
+    pub struct RdwVncDisplayClass {
         pub parent_class: rdw::imp::RdwDisplayClass,
     }
 
-    unsafe impl ClassStruct for RdwDisplayVncClass {
-        type Type = DisplayVnc;
+    unsafe impl ClassStruct for RdwVncDisplayClass {
+        type Type = VncDisplay;
     }
 
     #[repr(C)]
-    pub struct RdwDisplayVnc {
+    pub struct RdwVncDisplay {
         parent: rdw::imp::RdwDisplay,
     }
 
-    impl std::fmt::Debug for RdwDisplayVnc {
+    impl std::fmt::Debug for RdwVncDisplay {
         fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-            f.debug_struct("RdwDisplayVnc")
+            f.debug_struct("RdwVncDisplay")
                 .field("parent", &self.parent)
                 .finish()
         }
     }
 
-    unsafe impl InstanceStruct for RdwDisplayVnc {
-        type Type = DisplayVnc;
+    unsafe impl InstanceStruct for RdwVncDisplay {
+        type Type = VncDisplay;
     }
 
     #[derive(Debug)]
-    pub struct DisplayVnc {
+    pub struct VncDisplay {
         pub(crate) connection: gvnc::Connection,
         pub(crate) fb: RefCell<Option<Framebuffer>>,
         pub(crate) keycode_map: bool,
@@ -51,7 +51,7 @@ mod imp {
         pub(crate) last_button_mask: Cell<Option<u8>>,
     }
 
-    impl Default for DisplayVnc {
+    impl Default for VncDisplay {
         fn default() -> Self {
             Self {
                 connection: gvnc::Connection::new(),
@@ -65,15 +65,15 @@ mod imp {
     }
 
     #[glib::object_subclass]
-    impl ObjectSubclass for DisplayVnc {
-        const NAME: &'static str = "RdwDisplayVnc";
-        type Type = super::DisplayVnc;
+    impl ObjectSubclass for VncDisplay {
+        const NAME: &'static str = "RdwVncDisplay";
+        type Type = super::Display;
         type ParentType = rdw::Display;
-        type Class = RdwDisplayVncClass;
-        type Instance = RdwDisplayVnc;
+        type Class = RdwVncDisplayClass;
+        type Instance = RdwVncDisplay;
     }
 
-    impl ObjectImpl for DisplayVnc {
+    impl ObjectImpl for VncDisplay {
         fn constructed(&self, obj: &Self::Type) {
             self.parent_constructed(obj);
 
@@ -250,11 +250,11 @@ mod imp {
         }
     }
 
-    impl WidgetImpl for DisplayVnc {}
+    impl WidgetImpl for VncDisplay {}
 
-    impl rdw::DisplayImpl for DisplayVnc {}
+    impl rdw::DisplayImpl for VncDisplay {}
 
-    impl DisplayVnc {
+    impl VncDisplay {
         fn last_button_mask(&self) -> u8 {
             self.last_button_mask.get().unwrap_or(0)
         }
@@ -394,22 +394,22 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct DisplayVnc(ObjectSubclass<imp::DisplayVnc>) @extends rdw::Display, gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+    pub struct Display(ObjectSubclass<imp::VncDisplay>) @extends rdw::Display, gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
-impl DisplayVnc {
+impl Display {
     pub fn new() -> Self {
         glib::Object::new::<Self>(&[]).unwrap()
     }
 
     pub fn connection(&self) -> &gvnc::Connection {
-        let self_ = imp::DisplayVnc::from_instance(self);
+        let self_ = imp::VncDisplay::from_instance(self);
 
         &self_.connection
     }
 }
 
-impl Default for DisplayVnc {
+impl Default for Display {
     fn default() -> Self {
         Self::new()
     }

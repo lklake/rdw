@@ -32,7 +32,7 @@ fn vnc_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
         port = 5900;
     }
     let host = uri.host().unwrap_or_else(|| "localhost".into());
-    let vnc = rdw_vnc::DisplayVnc::new();
+    let vnc = rdw_vnc::Display::new();
     vnc.connection()
         .open_host(&host, &format!("{}", port))
         .unwrap();
@@ -106,7 +106,7 @@ fn vnc_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
 }
 
 fn spice_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
-    let spice = rdw_spice::DisplaySpice::new();
+    let spice = rdw_spice::Display::new();
     let session = spice.session();
 
     session.set_uri(Some(&uri.to_string()));

@@ -16,29 +16,29 @@ mod imp {
     use gtk::subclass::prelude::*;
 
     #[repr(C)]
-    pub struct RdwDisplaySpiceClass {
+    pub struct RdwSpiceDisplayClass {
         pub parent_class: rdw::imp::RdwDisplayClass,
     }
 
-    unsafe impl ClassStruct for RdwDisplaySpiceClass {
-        type Type = DisplaySpice;
+    unsafe impl ClassStruct for RdwSpiceDisplayClass {
+        type Type = SpiceDisplay;
     }
 
     #[repr(C)]
-    pub struct RdwDisplaySpice {
+    pub struct RdwSpiceDisplay {
         parent: rdw::imp::RdwDisplay,
     }
 
-    impl std::fmt::Debug for RdwDisplaySpice {
+    impl std::fmt::Debug for RdwSpiceDisplay {
         fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-            f.debug_struct("RdwDisplaySpice")
+            f.debug_struct("RdwSpiceDisplay")
                 .field("parent", &self.parent)
                 .finish()
         }
     }
 
-    unsafe impl InstanceStruct for RdwDisplaySpice {
-        type Type = DisplaySpice;
+    unsafe impl InstanceStruct for RdwSpiceDisplay {
+        type Type = SpiceDisplay;
     }
 
     #[derive(Default)]
@@ -53,7 +53,7 @@ mod imp {
     }
 
     #[derive(Default)]
-    pub struct DisplaySpice {
+    pub struct SpiceDisplay {
         pub(crate) session: spice::Session,
         pub(crate) monitor_config: Cell<Option<spice::DisplayMonitorConfig>>,
         pub(crate) main: glib::WeakRef<spice::MainChannel>,
@@ -65,15 +65,15 @@ mod imp {
     }
 
     #[glib::object_subclass]
-    impl ObjectSubclass for DisplaySpice {
-        const NAME: &'static str = "RdwDisplaySpice";
-        type Type = super::DisplaySpice;
+    impl ObjectSubclass for SpiceDisplay {
+        const NAME: &'static str = "RdwSpiceDisplay";
+        type Type = super::Display;
         type ParentType = rdw::Display;
-        type Class = RdwDisplaySpiceClass;
-        type Instance = RdwDisplaySpice;
+        type Class = RdwSpiceDisplayClass;
+        type Instance = RdwSpiceDisplay;
     }
 
-    impl ObjectImpl for DisplaySpice {
+    impl ObjectImpl for SpiceDisplay {
         fn constructed(&self, obj: &Self::Type) {
             self.parent_constructed(obj);
 
@@ -407,7 +407,7 @@ mod imp {
         }
     }
 
-    impl WidgetImpl for DisplaySpice {
+    impl WidgetImpl for SpiceDisplay {
         fn realize(&self, widget: &Self::Type) {
             self.parent_realize(widget);
 
@@ -416,9 +416,9 @@ mod imp {
         }
     }
 
-    impl rdw::DisplayImpl for DisplaySpice {}
+    impl rdw::DisplayImpl for SpiceDisplay {}
 
-    impl DisplaySpice {
+    impl SpiceDisplay {
         fn add_clipboard_watch(&self, selection: u32) {
             let obj = self.instance();
 
@@ -581,22 +581,22 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct DisplaySpice(ObjectSubclass<imp::DisplaySpice>) @extends rdw::Display, gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+    pub struct Display(ObjectSubclass<imp::SpiceDisplay>) @extends rdw::Display, gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
-impl DisplaySpice {
+impl Display {
     pub fn new() -> Self {
         glib::Object::new::<Self>(&[]).unwrap()
     }
 
     pub fn session(&self) -> &spice::Session {
-        let self_ = imp::DisplaySpice::from_instance(self);
+        let self_ = imp::SpiceDisplay::from_instance(self);
 
         &self_.session
     }
 }
 
-impl Default for DisplaySpice {
+impl Default for Display {
     fn default() -> Self {
         Self::new()
     }
