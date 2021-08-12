@@ -226,6 +226,7 @@ fn main() {
                 }
             };
             let dialog = gtk::Dialog::new();
+            dialog.set_transient_for(app.active_window().as_ref());
             dialog.set_child(Some(&usbredir));
             dialog.show();
         }
