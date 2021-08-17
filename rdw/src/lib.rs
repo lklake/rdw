@@ -1,3 +1,5 @@
+pub use gtk;
+
 use gtk::glib::{self, gflags, GEnum};
 
 mod content_provider;
@@ -5,7 +7,7 @@ mod display;
 mod egl;
 mod error;
 mod gstaudio;
-pub mod usbredir;
+mod usbredir;
 mod util;
 
 pub use content_provider::ContentProvider;
@@ -13,6 +15,7 @@ pub use display::*;
 pub use egl::DmabufScanout;
 pub use gstaudio::*;
 pub use usbredir::UsbRedir;
+pub use usbredir::Device as UsbDevice;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy, GEnum)]
 #[genum(type_name = "RdwScroll")]

@@ -58,7 +58,7 @@ impl UsbRedir {
     }
 }
 
-fn same_device(spice: &spice::UsbDevice, rdw: &rdw::usbredir::Device) -> bool {
+fn same_device(spice: &spice::UsbDevice, rdw: &rdw::UsbDevice) -> bool {
     let spice_device = match spice.libusb_device() {
         Some(d) => format!("{:?}", d),
         _ => return false,
