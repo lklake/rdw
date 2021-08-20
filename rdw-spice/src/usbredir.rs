@@ -50,6 +50,10 @@ impl UsbRedir {
 
         let free_channels = manager.free_channels();
         log::debug!("free_channels: {}", free_channels);
+        manager
+            .bind_property("free-channels", &redir, "free-channels")
+            .flags(glib::BindingFlags::DEFAULT | glib::BindingFlags::SYNC_CREATE)
+            .build();
         manager.connect_free_channels_notify(|manager| {
             log::debug!("Free USB channels: {}", manager.free_channels());
         });

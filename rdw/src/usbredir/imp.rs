@@ -1,9 +1,9 @@
 use super::*;
-use glib::{clone, subclass::Signal};
+use glib::{clone, subclass::Signal, ParamSpec};
 use gtk::CompositeTemplate;
 use once_cell::sync::Lazy;
 use rusb::UsbContext;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::thread::{self, JoinHandle};
 use usbredirhost::rusb;
 
@@ -62,6 +62,7 @@ impl RdwUsbContext {
 
         let ctx = ctxt.clone();
         let thread = thread::spawn(move || loop {
+            // note: there is a busy loop with libusb <= 1.0.24!..
             if let Err(e) = ctx.handle_events(None) {
                 log::warn!("USB context failed to loop: {}", e);
                 break;
@@ -109,9 +110,14 @@ pub struct UsbRedir {
     #[template_child]
     pub error_label: TemplateChild<gtk::Label>,
 
+    #[template_child]
+    pub free_label: TemplateChild<gtk::Label>,
+
     pub model: gio::ListStore,
 
     ctxt: RefCell<Option<RdwUsbContext>>,
+
+    free_channels: Cell<i32>,
 }
 
 impl Default for UsbRedir {
@@ -121,7 +127,9 @@ impl Default for UsbRedir {
             listbox: TemplateChild::default(),
             infobar: TemplateChild::default(),
             error_label: TemplateChild::default(),
+            free_label: TemplateChild::default(),
             ctxt: RefCell::default(),
+            free_channels: Cell::default(),
         }
     }
 }
@@ -145,6 +153,42 @@ impl ObjectSubclass for UsbRedir {
 
 impl ObjectImpl for UsbRedir {
     fn constructed(&self, _obj: &Self::Type) {}
+
+    fn properties() -> &'static [ParamSpec] {
+        static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
+            vec![
+                ParamSpec::new_int(
+                    "free-channels",
+                    "Free channels",
+                    "Number of free channels",
+                    -1,
+                    i32::MAX,
+                    -1,
+                    glib::ParamFlags::READWRITE,
+                ),
+            ]
+        });
+        PROPERTIES.as_ref()
+    }
+
+    fn property(&self, _obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+        match pspec.name() {
+            "free-channels" => self.free_channels.get().to_value(),
+            _ => unimplemented!(),
+        }
+    }
+
+    fn set_property(&self, _tag: &Self::Type, _id: usize, value: &glib::Value, pspec: &ParamSpec) {
+        match pspec.name() {
+            "free-channels" => {
+                let n = value.get().unwrap();
+                self.free_channels.set(n);
+                self.free_label.set_label(&format!("({} free channels)", n));
+                self.free_label.set_visible(n >= 0);
+            }
+            _ => unimplemented!(),
+        }
+    }
 
     fn signals() -> &'static [Signal] {
         static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
