@@ -2,9 +2,9 @@
 members = [
     "demo",
     "keycodemap",
-    "rdw",
-    "rdw-spice",
-    "rdw-vnc",
+    "rdw4",
+    "rdw4-spice",
+    "rdw4-vnc",
     "xtask",
 ]
 exclude = [
@@ -12,13 +12,3 @@ exclude = [
 ]
 
 default-members = ["demo"]
-
-[patch.crates-io]
-usbredirhost = { path = "/home/elmarco/src/usbredir-rs/usbredirhost" }
-libusb1-sys = { path = "/home/elmarco/src/rusb/libusb1-sys" }
-rusb = { path = "/home/elmarco/src/rusb" }
-
-[patch."https://github.com/gtk-rs/gtk4-rs"]
-gdk4-wayland = { path = '/home/elmarco/src/gtk4-rs/gdk4-wayland' }
-gdk4-x11 = { path = '/home/elmarco/src/gtk4-rs/gdk4-x11' }
-gtk4 = { path = '/home/elmarco/src/gtk4-rs/gtk4' }

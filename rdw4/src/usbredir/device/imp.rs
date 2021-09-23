@@ -1,10 +1,11 @@
-use std::cell::{Cell, RefCell};
-use std::fs::*;
-use std::io::prelude::*;
+use std::{
+    cell::{Cell, RefCell},
+    fs::*,
+    io::prelude::*,
+};
 
 use glib::{subclass::Signal, ParamFlags, ParamSpec};
-use gtk::glib;
-use gtk::{prelude::*, subclass::prelude::*};
+use gtk::{glib, prelude::*, subclass::prelude::*};
 use once_cell::sync::Lazy;
 use usbredirhost::rusb;
 

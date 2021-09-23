@@ -1,6 +1,7 @@
 use glib::{clone, subclass::prelude::*, translate::*};
 use gtk::{glib, prelude::*};
 use gvnc::prelude::*;
+use rdw::gtk;
 
 use keycodemap::KEYMAP_XORGEVDEV2QNUM;
 use rdw::DisplayExt;

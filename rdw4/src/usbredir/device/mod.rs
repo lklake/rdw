@@ -1,15 +1,14 @@
 pub mod imp;
 
-use glib::object::ObjectType as ObjectType_;
-use glib::signal::connect_raw;
-use glib::signal::SignalHandlerId;
-use glib::translate::*;
-use glib::Object;
-use std::boxed::Box as Box_;
-use std::mem::transmute;
+use glib::{
+    object::ObjectType as ObjectType_,
+    signal::{connect_raw, SignalHandlerId},
+    translate::*,
+    Object,
+};
+use std::{boxed::Box as Box_, mem::transmute};
 
-use gtk::glib;
-use gtk::subclass::prelude::*;
+use gtk::{glib, subclass::prelude::*};
 use usbredirhost::rusb;
 
 glib::wrapper! {

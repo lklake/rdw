@@ -5,13 +5,15 @@ use gtk::{gdk, glib, graphene, prelude::*, subclass::prelude::WidgetImpl};
 use std::cell::Cell;
 
 use wayland_client::{Display as WlDisplay, GlobalManager};
-use wayland_protocols::unstable::pointer_constraints::v1::client::zwp_locked_pointer_v1::ZwpLockedPointerV1;
-use wayland_protocols::unstable::pointer_constraints::v1::client::zwp_pointer_constraints_v1::{
-    Lifetime, ZwpPointerConstraintsV1,
-};
-use wayland_protocols::unstable::relative_pointer::v1::client::zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1;
-use wayland_protocols::unstable::relative_pointer::v1::client::zwp_relative_pointer_v1::{
-    Event as RelEvent, ZwpRelativePointerV1,
+use wayland_protocols::unstable::{
+    pointer_constraints::v1::client::{
+        zwp_locked_pointer_v1::ZwpLockedPointerV1,
+        zwp_pointer_constraints_v1::{Lifetime, ZwpPointerConstraintsV1},
+    },
+    relative_pointer::v1::client::{
+        zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1,
+        zwp_relative_pointer_v1::{Event as RelEvent, ZwpRelativePointerV1},
+    },
 };
 use x11::xlib;
 

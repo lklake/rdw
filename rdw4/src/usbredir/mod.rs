@@ -1,15 +1,11 @@
-use glib::object::Cast;
-use glib::object::ObjectExt;
-use glib::object::ObjectType as ObjectType_;
-use glib::signal::connect_raw;
-use glib::signal::SignalHandlerId;
-use glib::translate::*;
-use glib::StaticType;
-use glib::ToValue;
-use gtk::subclass::prelude::*;
-use gtk::{gio, glib, prelude::*};
-use std::boxed::Box as Box_;
-use std::mem::transmute;
+use glib::{
+    object::{Cast, ObjectExt, ObjectType as ObjectType_},
+    signal::{connect_raw, SignalHandlerId},
+    translate::*,
+    StaticType, ToValue,
+};
+use gtk::{gio, glib, prelude::*, subclass::prelude::*};
+use std::{boxed::Box as Box_, mem::transmute};
 
 mod device;
 pub use device::Device;

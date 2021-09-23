@@ -1,9 +1,8 @@
 use glib::translate::ToGlibPtrMut;
-use gtk::prelude::*;
 use gtk::{glib, subclass::prelude::ObjectSubclassExt};
+use rdw::gtk;
 
-use gvnc::prelude::*;
-use gvnc::subclass::base_framebuffer::*;
+use gvnc::{prelude::*, subclass::base_framebuffer::*};
 
 mod imp {
     use super::*;

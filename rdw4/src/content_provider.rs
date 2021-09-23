@@ -1,7 +1,6 @@
 use glib::subclass::prelude::*;
 use gtk::{gdk, gio, glib};
-use std::future::Future;
-use std::pin::Pin;
+use std::{future::Future, pin::Pin};
 
 type WriteFunc = dyn Fn(
         &str,

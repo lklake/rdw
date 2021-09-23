@@ -1,10 +1,15 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::{cell::RefCell, sync::Arc};
+use std::{
+    cell::RefCell,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 use gio::ApplicationFlags;
 use glib::{clone, translate::IntoGlib};
 use gtk::{gdk, gio, glib, prelude::*};
-use rdw::DisplayExt;
+use rdw::{gtk, DisplayExt};
 use rdw_spice::spice::{self, prelude::*};
 use rdw_vnc::{gvnc, rdw};
 

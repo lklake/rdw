@@ -1,5 +1,5 @@
 use gst::prelude::*;
-use gst_audio::StreamVolumeExt;
+use gst_audio::prelude::*;
 use std::{collections::HashMap, error::Error};
 
 #[derive(Debug)]
@@ -15,11 +15,11 @@ impl GstAudioOut {
         let pipeline = gst::parse_launch(pipeline)?;
         let pipeline = pipeline.dynamic_cast::<gst::Pipeline>().unwrap();
         let src = pipeline
-            .get_by_name("src")
+            .by_name("src")
             .unwrap()
             .dynamic_cast::<gst_app::AppSrc>()
             .unwrap();
-        let sink = pipeline.get_by_name("sink").unwrap();
+        let sink = pipeline.by_name("sink").unwrap();
         Ok(Self {
             pipeline,
             src,
@@ -78,7 +78,7 @@ impl GstAudio {
         let stream_vol = self
             .get_out(id)?
             .pipeline
-            .get_by_interface(gst_audio::StreamVolume::static_type())
+            .by_interface(gst_audio::StreamVolume::static_type())
             .ok_or("Pipeline doesn't support volume")?
             .dynamic_cast::<gst_audio::StreamVolume>()
             .unwrap();

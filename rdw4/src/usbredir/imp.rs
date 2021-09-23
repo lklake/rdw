@@ -3,8 +3,10 @@ use glib::{clone, subclass::Signal, ParamSpec};
 use gtk::CompositeTemplate;
 use once_cell::sync::Lazy;
 use rusb::UsbContext;
-use std::cell::{Cell, RefCell};
-use std::thread::{self, JoinHandle};
+use std::{
+    cell::{Cell, RefCell},
+    thread::{self, JoinHandle},
+};
 use usbredirhost::rusb;
 
 #[derive(Debug)]
@@ -46,13 +48,10 @@ impl RdwUsbContext {
         };
 
         let (tx, rx) = glib::MainContext::channel(glib::source::Priority::default());
-        let reg = match ctxt.hotplug_register_callback(
-            None,
-            None,
-            None,
-            true,
-            Box::new(RdwUsbHandler { tx }),
-        ) {
+        let reg = match rusb::HotplugBuilder::new()
+            .enumerate(true)
+            .register(&ctxt, Box::new(RdwUsbHandler { tx }))
+        {
             Ok(reg) => reg,
             Err(e) => {
                 log::warn!("Failed to register USB callback: {}", e);
@@ -156,17 +155,15 @@ impl ObjectImpl for UsbRedir {
 
     fn properties() -> &'static [ParamSpec] {
         static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
-            vec![
-                ParamSpec::new_int(
-                    "free-channels",
-                    "Free channels",
-                    "Number of free channels",
-                    -1,
-                    i32::MAX,
-                    -1,
-                    glib::ParamFlags::READWRITE,
-                ),
-            ]
+            vec![ParamSpec::new_int(
+                "free-channels",
+                "Free channels",
+                "Number of free channels",
+                -1,
+                i32::MAX,
+                -1,
+                glib::ParamFlags::READWRITE,
+            )]
         });
         PROPERTIES.as_ref()
     }

@@ -14,8 +14,7 @@ pub use content_provider::ContentProvider;
 pub use display::*;
 pub use egl::DmabufScanout;
 pub use gstaudio::*;
-pub use usbredir::UsbRedir;
-pub use usbredir::Device as UsbDevice;
+pub use usbredir::{Device as UsbDevice, UsbRedir};
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy, GEnum)]
 #[genum(type_name = "RdwScroll")]

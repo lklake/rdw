@@ -8,6 +8,5 @@ edition = "2018"
 
 [dependencies]
 env_logger = { version = "0.7", default-features = false }
-gtk = { package = "gtk4", git = "https://github.com/gtk-rs/gtk4-rs" }
-rdw-vnc = { path = "../rdw-vnc" }
-rdw-spice = { path = "../rdw-spice" }
+rdw-vnc = { package = "rdw4-vnc", path = "../rdw4-vnc" }
+rdw-spice = { package = "rdw4-spice", path = "../rdw4-spice" }
