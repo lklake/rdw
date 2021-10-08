@@ -5,7 +5,7 @@ use once_cell::sync::Lazy;
 use rusb::UsbContext;
 use std::{
     cell::{Cell, RefCell},
-    thread::{self, JoinHandle},
+    thread,
 };
 use usbredirhost::rusb;
 
@@ -32,8 +32,9 @@ impl<T: UsbContext> rusb::Hotplug<T> for RdwUsbHandler<T> {
 
 #[derive(Debug)]
 struct RdwUsbContext {
+    #[allow(unused)]
     pub ctxt: rusb::Context,
-    pub thread: JoinHandle<()>,
+    #[allow(unused)]
     pub reg: rusb::Registration<rusb::Context>,
 }
 
@@ -60,14 +61,14 @@ impl RdwUsbContext {
         };
 
         let ctx = ctxt.clone();
-        let thread = thread::spawn(move || loop {
+        thread::spawn(move || loop {
             // note: there is a busy loop with libusb <= 1.0.24!..
             if let Err(e) = ctx.handle_events(None) {
                 log::warn!("USB context failed to loop: {}", e);
                 break;
             }
         });
-        Some((Self { ctxt, thread, reg }, rx))
+        Some((Self { ctxt, reg }, rx))
     }
 }
 
