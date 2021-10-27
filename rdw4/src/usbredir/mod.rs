@@ -11,6 +11,7 @@ mod device;
 pub use device::Device;
 
 mod imp;
+/// cbindgen:ignore
 mod row;
 
 glib::wrapper! {

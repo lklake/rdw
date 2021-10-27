@@ -1027,6 +1027,7 @@ impl Display {
     }
 }
 
+/// cbindgen:ignore
 pub const NONE_DISPLAY: Option<&Display> = None;
 
 pub trait DisplayExt: 'static {

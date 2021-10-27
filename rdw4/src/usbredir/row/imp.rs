@@ -17,7 +17,7 @@ pub struct Row {
 
 #[glib::object_subclass]
 impl ObjectSubclass for Row {
-    const NAME: &'static str = "Row";
+    const NAME: &'static str = "RdwUsbRow";
     type Type = super::Row;
     type ParentType = gtk::Widget;
 

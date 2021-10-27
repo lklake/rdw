@@ -4,12 +4,13 @@ version = "0.1.0"
 authors = ["Marc-André Lureau <marcandre.lureau@redhat.com>"]
 edition = "2018"
 
-[lib]
-crate-type = ["rlib", "cdylib"]
-
 [features]
 default = []
 capi = []
+
+[build-dependencies]
+cargo_metadata = "0.13.1"
+cbindgen = { path = "../cbindgen", features = ["gobject"] }
 
 [dependencies]
 log = "0.4"
@@ -32,4 +33,10 @@ usbredirhost = "0.0.1"
 futures = "0.3.13"
 
 [package.metadata.capi.header]
+name = "rdw"
+subdirectory = "rdw4"
 generation = false
+
+[package.metadata.capi.pkg_config]
+filename = "rdw4"
+requires = "gtk4"

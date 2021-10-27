@@ -18,7 +18,7 @@ pub struct Device {
 
 #[glib::object_subclass]
 impl ObjectSubclass for Device {
-    const NAME: &'static str = "Device";
+    const NAME: &'static str = "RdwUsbDevice";
     type Type = super::Device;
     type ParentType = glib::Object;
 }

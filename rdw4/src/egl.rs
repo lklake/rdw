@@ -15,13 +15,13 @@ pub(crate) fn egl() -> &'static EglInstance {
     })
 }
 
-pub const LINUX_DMA_BUF_EXT: Enum = 0x3270;
-pub const LINUX_DRM_FOURCC_EXT: Int = 0x3271;
-pub const DMA_BUF_PLANE0_FD_EXT: Int = 0x3272;
-pub const DMA_BUF_PLANE0_OFFSET_EXT: Int = 0x3273;
-pub const DMA_BUF_PLANE0_PITCH_EXT: Int = 0x3274;
-pub const DMA_BUF_PLANE0_MODIFIER_LO_EXT: Int = 0x3443;
-pub const DMA_BUF_PLANE0_MODIFIER_HI_EXT: Int = 0x3444;
+pub(crate) const LINUX_DMA_BUF_EXT: Enum = 0x3270;
+pub(crate) const LINUX_DRM_FOURCC_EXT: Int = 0x3271;
+pub(crate) const DMA_BUF_PLANE0_FD_EXT: Int = 0x3272;
+pub(crate) const DMA_BUF_PLANE0_OFFSET_EXT: Int = 0x3273;
+pub(crate) const DMA_BUF_PLANE0_PITCH_EXT: Int = 0x3274;
+pub(crate) const DMA_BUF_PLANE0_MODIFIER_LO_EXT: Int = 0x3443;
+pub(crate) const DMA_BUF_PLANE0_MODIFIER_HI_EXT: Int = 0x3444;
 
 // GLAPI void APIENTRY glEGLImageTargetTexture2DOES (GLenum target, GLeglImageOES image);
 

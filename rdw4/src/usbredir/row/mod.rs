@@ -8,17 +8,12 @@ glib::wrapper! {
 }
 
 impl Row {
-    pub fn new(device: &Device) -> Self {
+    pub(crate) fn new(device: &Device) -> Self {
         glib::Object::new(&[("device", device)]).expect("Failed to create Row")
     }
 
-    pub fn switch(&self) -> &gtk::Switch {
+    pub(crate) fn switch(&self) -> &gtk::Switch {
         let self_ = imp::Row::from_instance(self);
         &*self_.switch
-    }
-
-    pub fn label(&self) -> &gtk::Label {
-        let self_ = imp::Row::from_instance(self);
-        &*self_.label
     }
 }

@@ -13,6 +13,7 @@ mod util;
 pub use content_provider::ContentProvider;
 pub use display::*;
 pub use egl::DmabufScanout;
+pub use error::Error;
 pub use gstaudio::*;
 pub use usbredir::{Device as UsbDevice, UsbRedir};
 
@@ -26,7 +27,7 @@ pub enum Scroll {
     Right,
 }
 
-#[gflags("KeyEvent")]
+#[gflags("RdwKeyEvent")]
 #[repr(C)] // See https://github.com/bitflags/bitflags/pull/187
 pub enum KeyEvent {
     PRESS = 0b0000_0001,
