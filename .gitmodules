@@ -1,7 +1,7 @@
 [submodule "cbindgen"]
 	path = cbindgen
 	url = https://github.com/elmarco/cbindgen.git
-	branch = gbindgen
+	branch = gobject
 [submodule "keycodemapdb"]
 	path = keycodemapdb
 	url = http://gitlab.com/keycodemap/keycodemapdb.git
