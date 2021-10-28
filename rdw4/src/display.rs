@@ -1,52 +1,57 @@
 use gdk_wl::prelude::*;
-use gl::types::*;
-use glib::{clone, signal::SignalHandlerId, subclass::prelude::*, translate::*, SourceId};
-use gtk::{gdk, glib, graphene, prelude::*, subclass::prelude::WidgetImpl};
-use std::cell::Cell;
+use glib::{signal::SignalHandlerId, subclass::prelude::*, translate::*};
+use gtk::{gdk, glib, prelude::*, subclass::prelude::WidgetImpl};
 
-use wayland_client::{Display as WlDisplay, GlobalManager};
-use wayland_protocols::unstable::{
-    pointer_constraints::v1::client::{
-        zwp_locked_pointer_v1::ZwpLockedPointerV1,
-        zwp_pointer_constraints_v1::{Lifetime, ZwpPointerConstraintsV1},
-    },
-    relative_pointer::v1::client::{
-        zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1,
-        zwp_relative_pointer_v1::{Event as RelEvent, ZwpRelativePointerV1},
-    },
-};
-use x11::xlib;
+use crate::{Grab, KeyEvent, RdwDmabufScanout, Scroll};
 
-use crate::{egl, error::Error, util, DmabufScanout, Grab, KeyEvent, Scroll};
+#[cfg(not(feature = "bindings"))]
+use crate::egl;
 
-pub mod imp {
-    use std::{cell::RefCell, time::Duration};
+#[repr(C)]
+pub struct RdwDisplayClass {
+    pub parent_class: gtk::ffi::GtkWidgetClass,
+}
 
-    use super::*;
-    use glib::subclass::Signal;
-    use gtk::subclass::prelude::*;
-    use once_cell::sync::{Lazy, OnceCell};
+#[repr(C)]
+pub struct RdwDisplay {
+    parent: gtk::ffi::GtkWidget,
+}
 
-    #[repr(C)]
-    pub struct RdwDisplayClass {
-        pub parent_class: gtk::ffi::GtkWidgetClass,
+impl std::fmt::Debug for RdwDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("RdwDisplay")
+            .field("parent", &self.parent)
+            .finish()
     }
+}
+
+#[cfg(not(feature = "bindings"))]
+pub mod imp {
+    use super::*;
+    use crate::{error::Error, util};
+    use gl::types::*;
+    use glib::{clone, subclass::Signal, SourceId};
+    use gtk::{graphene, subclass::prelude::*};
+    use once_cell::sync::{Lazy, OnceCell};
+    use std::{
+        cell::{Cell, RefCell},
+        time::Duration,
+    };
+    use wayland_client::{Display as WlDisplay, GlobalManager};
+    use wayland_protocols::unstable::{
+        pointer_constraints::v1::client::{
+            zwp_locked_pointer_v1::ZwpLockedPointerV1,
+            zwp_pointer_constraints_v1::{Lifetime, ZwpPointerConstraintsV1},
+        },
+        relative_pointer::v1::client::{
+            zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1,
+            zwp_relative_pointer_v1::{Event as RelEvent, ZwpRelativePointerV1},
+        },
+    };
+    use x11::xlib;
 
     unsafe impl ClassStruct for RdwDisplayClass {
         type Type = Display;
-    }
-
-    #[repr(C)]
-    pub struct RdwDisplay {
-        parent: gtk::ffi::GtkWidget,
-    }
-
-    impl std::fmt::Debug for RdwDisplay {
-        fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-            f.debug_struct("RdwDisplay")
-                .field("parent", &self.parent)
-                .finish()
-        }
     }
 
     unsafe impl InstanceStruct for RdwDisplay {
@@ -65,7 +70,7 @@ pub mod imp {
         pub(crate) cursor: RefCell<Option<gdk::Cursor>>,
         pub(crate) mouse_absolute: Cell<bool>,
         // position of cursor when drawn by client
-        pub(crate) cursor_position: Cell<Option<(u32, u32)>>,
+        pub(crate) cursor_position: Cell<Option<(usize, usize)>>,
         // press-and-release detection time in ms
         pub(crate) synthesize_delay: Cell<u32>,
         pub(crate) last_key_press: Cell<Option<(u32, u32)>>,
@@ -86,7 +91,7 @@ pub mod imp {
         pub(crate) texture_blit_vao: Cell<GLuint>,
         pub(crate) texture_blit_prog: Cell<GLuint>,
         pub(crate) texture_blit_flip_prog: Cell<GLuint>,
-        pub(crate) dmabuf: RefCell<Option<DmabufScanout>>,
+        pub(crate) dmabuf: RefCell<Option<RdwDmabufScanout>>,
 
         pub(crate) wl_source: Cell<Option<glib::SourceId>>,
         pub(crate) wl_rel_manager: OnceCell<wayland_client::Main<ZwpRelativePointerManagerV1>>,
@@ -185,6 +190,13 @@ pub mod imp {
                         100,
                         Flags::READWRITE | Flags::CONSTRUCT,
                     ),
+                    glib::ParamSpec::new_boolean(
+                        "mouse-absolute",
+                        "Mouse absolute",
+                        "Whether the mouse is absolute or relative",
+                        false,
+                        Flags::READWRITE | Flags::CONSTRUCT,
+                    ),
                 ]
             });
             PROPERTIES.as_ref()
@@ -206,15 +218,25 @@ pub mod imp {
                     let delay = value.get().unwrap();
                     self.synthesize_delay.set(delay);
                 }
+                "mouse-absolute" => {
+                    let absolute = value.get().unwrap();
+                    if absolute {
+                        self.ungrab_mouse();
+                        self.gl_area().set_cursor(self.cursor.borrow().as_ref());
+                    }
+
+                    self.mouse_absolute.set(absolute);
+                }
                 _ => unimplemented!(),
             }
         }
 
-        fn property(&self, obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+        fn property(&self, _obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
             match pspec.name() {
-                "grab-shortcut" => obj.grab_shortcut().to_value(),
-                "grabbed" => obj.grabbed().to_value(),
+                "grab-shortcut" => self.grab_shortcut.get().to_value(),
+                "grabbed" => self.grabbed.get().to_value(),
                 "synthesize-delay" => self.synthesize_delay.get().to_value(),
+                "mouse-absolute" => self.mouse_absolute.get().to_value(),
                 _ => unimplemented!(),
             }
         }
@@ -455,7 +477,7 @@ pub mod imp {
                 if let Some(cursor) = &*self.cursor.borrow() {
                     if let Some(texture) = cursor.texture() {
                         // don't take hotspot as an offset (it's not for hw cursor)
-                        if let Some((x, y)) = self.transform_pos_inv(pos.0.into(), pos.1.into()) {
+                        if let Some((x, y)) = self.transform_pos_inv(pos.0 as _, pos.1 as _) {
                             let sf = widget.scale_factor();
 
                             snapshot.append_texture(
@@ -1041,15 +1063,15 @@ pub trait DisplayExt: 'static {
 
     fn set_mouse_absolute(&self, absolute: bool);
 
-    fn set_cursor_position(&self, pos: Option<(u32, u32)>);
+    fn set_cursor_position(&self, pos: Option<(usize, usize)>);
 
-    fn grab_shortcut(&self) -> &gtk::ShortcutTrigger;
+    fn grab_shortcut(&self) -> gtk::ShortcutTrigger;
 
     fn grabbed(&self) -> Grab;
 
     fn update_area(&self, x: i32, y: i32, w: i32, h: i32, stride: i32, data: &[u8]);
 
-    fn set_dmabuf_scanout(&self, s: DmabufScanout);
+    fn set_dmabuf_scanout(&self, s: RdwDmabufScanout);
 
     fn render(&self);
 
@@ -1081,208 +1103,271 @@ pub trait DisplayExt: 'static {
 impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O {
     fn display_size(&self) -> Option<(usize, usize)> {
         // Safety: safe because IsA<Display>
-        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
+        let self_: &Display = unsafe { self.unsafe_cast_ref::<Display>() };
 
-        self_.display_size.get()
+        #[cfg(feature = "bindings")]
+        unsafe {
+            let (mut w, mut h) = (
+                std::mem::MaybeUninit::uninit(),
+                std::mem::MaybeUninit::uninit(),
+            );
+            ffi::rdw_display_get_display_size(
+                self_.to_glib_none().0,
+                w.as_mut_ptr(),
+                h.as_mut_ptr(),
+            )
+            .then(|| (w.assume_init(), h.assume_init()))
+        }
+        #[cfg(not(feature = "bindings"))]
+        {
+            let self_ = imp::Display::from_instance(self_);
+
+            self_.display_size.get()
+        }
     }
 
     fn set_display_size(&self, size: Option<(usize, usize)>) {
         // Safety: safe because IsA<Display>
-        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
+        let self_: &Display = unsafe { self.unsafe_cast_ref::<Display>() };
 
-        if self.display_size() == size {
-            return;
+        #[cfg(feature = "bindings")]
+        unsafe {
+            let (w, h) = if let Some(size) = size {
+                (size.0, size.1)
+            } else {
+                (0, 0)
+            };
+            ffi::rdw_display_set_display_size(self_.to_glib_none().0, w, h);
         }
+        #[cfg(not(feature = "bindings"))]
+        {
+            let self_ = imp::Display::from_instance(self_);
 
-        let _ctx = self_.make_current();
-        if let Some((width, height)) = size {
-            unsafe {
-                gl::BindTexture(gl::TEXTURE_2D, self_.texture_id());
-                gl::TexImage2D(
-                    gl::TEXTURE_2D,
-                    0,
-                    gl::RGB as _,
-                    width as _,
-                    height as _,
-                    0,
-                    gl::BGRA,
-                    gl::UNSIGNED_BYTE,
-                    std::ptr::null(),
-                );
+            if self.display_size() == size {
+                return;
             }
-        }
 
-        self_.display_size.replace(size);
-        self.queue_resize();
+            let _ctx = self_.make_current();
+            if let Some((width, height)) = size {
+                unsafe {
+                    gl::BindTexture(gl::TEXTURE_2D, self_.texture_id());
+                    gl::TexImage2D(
+                        gl::TEXTURE_2D,
+                        0,
+                        gl::RGB as _,
+                        width as _,
+                        height as _,
+                        0,
+                        gl::BGRA,
+                        gl::UNSIGNED_BYTE,
+                        std::ptr::null(),
+                    );
+                }
+            }
+
+            self_.display_size.replace(size);
+            self.queue_resize();
+        }
     }
 
     fn define_cursor(&self, cursor: Option<gdk::Cursor>) {
         // Safety: safe because IsA<Display>
-        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
+        let self_: &Display = unsafe { self.unsafe_cast_ref::<Display>() };
 
-        if self.mouse_absolute() {
-            self_.gl_area().set_cursor(cursor.as_ref());
+        #[cfg(feature = "bindings")]
+        unsafe {
+            ffi::rdw_display_define_cursor(self_.to_glib_none().0, cursor.to_glib_none().0);
         }
-        self_.cursor.replace(cursor);
+        #[cfg(not(feature = "bindings"))]
+        {
+            let self_ = imp::Display::from_instance(self_);
+            if self.mouse_absolute() {
+                self_.gl_area().set_cursor(cursor.as_ref());
+            }
+            self_.cursor.replace(cursor);
+        }
     }
 
     fn mouse_absolute(&self) -> bool {
-        // Safety: safe because IsA<Display>
-        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
-
-        self_.mouse_absolute.get()
+        self.property("mouse-absolute").unwrap().get().unwrap()
     }
 
     fn set_mouse_absolute(&self, absolute: bool) {
-        // Safety: safe because IsA<Display>
-        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
+        self.set_property("mouse-absolute", absolute).unwrap()
+    }
 
-        if absolute {
-            self_.ungrab_mouse();
-            self_.gl_area().set_cursor(self_.cursor.borrow().as_ref());
+    fn set_cursor_position(&self, pos: Option<(usize, usize)>) {
+        // Safety: safe because IsA<Display>
+        let self_: &Display = unsafe { self.unsafe_cast_ref::<Display>() };
+
+        #[cfg(feature = "bindings")]
+        unsafe {
+            let (x, y, enabled) = match pos {
+                Some((x, y)) => (x, y, true),
+                None => (0, 0, false),
+            };
+            ffi::rdw_display_set_cursor_position(self_.to_glib_none().0, enabled, x, y);
         }
+        #[cfg(not(feature = "bindings"))]
+        {
+            let self_ = imp::Display::from_instance(self_);
 
-        self_.mouse_absolute.set(absolute);
+            self_.cursor_position.set(pos);
+            self.queue_draw();
+        }
     }
 
-    fn set_cursor_position(&self, pos: Option<(u32, u32)>) {
-        // Safety: safe because IsA<Display>
-        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
-
-        self_.cursor_position.set(pos);
-        self.queue_draw();
-    }
-
-    fn grab_shortcut(&self) -> &gtk::ShortcutTrigger {
-        // Safety: safe because IsA<Display>
-        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
-
-        self_.grab_shortcut.get().unwrap()
+    fn grab_shortcut(&self) -> gtk::ShortcutTrigger {
+        self.property("grab-shortcut").unwrap().get().unwrap()
     }
 
     fn grabbed(&self) -> Grab {
-        // Safety: safe because IsA<Display>
-        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
-
-        self_.grabbed.get()
+        self.property("grabbed").unwrap().get().unwrap()
     }
 
     fn update_area(&self, x: i32, y: i32, w: i32, h: i32, stride: i32, data: &[u8]) {
         // Safety: safe because IsA<Display>
-        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
-        let _ctx = self_.make_current();
+        let self_: &Display = unsafe { self.unsafe_cast_ref::<Display>() };
 
-        // TODO: check data boundaries
+        #[cfg(feature = "bindings")]
         unsafe {
-            gl::BindTexture(gl::TEXTURE_2D, self_.texture_id());
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as _);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as _);
-            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, stride / 4);
-            gl::TexSubImage2D(
-                gl::TEXTURE_2D,
-                0,
-                x,
-                y,
-                w,
-                h,
-                gl::BGRA,
-                gl::UNSIGNED_BYTE,
-                data.as_ptr() as _,
-            );
+            ffi::rdw_display_update_area(self_.to_glib_none().0, x, y, w, h, stride, data.as_ptr());
         }
+        #[cfg(not(feature = "bindings"))]
+        {
+            let self_ = imp::Display::from_instance(self_);
+            let _ctx = self_.make_current();
 
-        self_.dmabuf.replace(None);
-        self_.gl_area().queue_render();
+            // TODO: check data boundaries
+            unsafe {
+                gl::BindTexture(gl::TEXTURE_2D, self_.texture_id());
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as _);
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as _);
+                gl::PixelStorei(gl::UNPACK_ROW_LENGTH, stride / 4);
+                gl::TexSubImage2D(
+                    gl::TEXTURE_2D,
+                    0,
+                    x,
+                    y,
+                    w,
+                    h,
+                    gl::BGRA,
+                    gl::UNSIGNED_BYTE,
+                    data.as_ptr() as _,
+                );
+            }
+
+            self_.dmabuf.replace(None);
+            self_.gl_area().queue_render();
+        }
     }
 
-    fn set_dmabuf_scanout(&self, s: DmabufScanout) {
+    fn set_dmabuf_scanout(&self, s: RdwDmabufScanout) {
         // Safety: safe because IsA<Display>
-        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
-        let _ctx = self_.make_current();
+        let self_: &Display = unsafe { self.unsafe_cast_ref::<Display>() };
 
-        let egl = egl::egl();
-        let egl_image_target = match egl::image_target_texture_2d_oes() {
-            Some(func) => func,
-            _ => {
-                log::warn!("ImageTargetTexture2DOES support missing");
-                return;
-            }
-        };
-
-        let egl_dpy = match self_.egl_display() {
-            Some(dpy) => dpy,
-            None => {
-                log::warn!("Unsupported display kind (or not egl)");
-                return;
-            }
-        };
-
-        let attribs = vec![
-            egl::WIDTH as usize,
-            s.width as usize,
-            egl::HEIGHT as usize,
-            s.height as usize,
-            egl::LINUX_DRM_FOURCC_EXT as usize,
-            s.fourcc as usize,
-            egl::DMA_BUF_PLANE0_FD_EXT as usize,
-            s.fd as usize,
-            egl::DMA_BUF_PLANE0_PITCH_EXT as usize,
-            s.stride as usize,
-            egl::DMA_BUF_PLANE0_OFFSET_EXT as usize,
-            0,
-            egl::DMA_BUF_PLANE0_MODIFIER_LO_EXT as usize,
-            (s.modifier & 0xffffffff) as usize,
-            egl::DMA_BUF_PLANE0_MODIFIER_HI_EXT as usize,
-            (s.modifier >> 32 & 0xffffffff) as usize,
-            egl::NONE as usize,
-        ];
-
-        let img = match egl.create_image(
-            egl_dpy,
-            egl::no_context(),
-            egl::LINUX_DMA_BUF_EXT,
-            egl::no_client_buffer(),
-            &attribs,
-        ) {
-            Ok(img) => img,
-            Err(e) => {
-                log::warn!("eglCreateImage() failed: {}", e);
-                return;
-            }
-        };
-
+        #[cfg(feature = "bindings")]
         unsafe {
-            gl::BindTexture(gl::TEXTURE_2D, self_.texture_id());
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as _);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as _);
-            egl_image_target(gl::TEXTURE_2D, img.as_ptr() as gl::types::GLeglImageOES);
+            ffi::rdw_display_set_dmabuf_scanout(self_.to_glib_none().0, &s);
         }
+        #[cfg(not(feature = "bindings"))]
+        {
+            let self_ = imp::Display::from_instance(self_);
+            let _ctx = self_.make_current();
 
-        self_.dmabuf.replace(Some(s));
+            let egl = egl::egl();
+            let egl_image_target = match egl::image_target_texture_2d_oes() {
+                Some(func) => func,
+                _ => {
+                    log::warn!("ImageTargetTexture2DOES support missing");
+                    return;
+                }
+            };
 
-        if let Err(e) = egl.destroy_image(egl_dpy, img) {
-            log::warn!("eglDestroyImage() failed: {}", e);
+            let egl_dpy = match self_.egl_display() {
+                Some(dpy) => dpy,
+                None => {
+                    log::warn!("Unsupported display kind (or not egl)");
+                    return;
+                }
+            };
+
+            let attribs = vec![
+                egl::WIDTH as usize,
+                s.width as usize,
+                egl::HEIGHT as usize,
+                s.height as usize,
+                egl::LINUX_DRM_FOURCC_EXT as usize,
+                s.fourcc as usize,
+                egl::DMA_BUF_PLANE0_FD_EXT as usize,
+                s.fd as usize,
+                egl::DMA_BUF_PLANE0_PITCH_EXT as usize,
+                s.stride as usize,
+                egl::DMA_BUF_PLANE0_OFFSET_EXT as usize,
+                0,
+                egl::DMA_BUF_PLANE0_MODIFIER_LO_EXT as usize,
+                (s.modifier & 0xffffffff) as usize,
+                egl::DMA_BUF_PLANE0_MODIFIER_HI_EXT as usize,
+                (s.modifier >> 32 & 0xffffffff) as usize,
+                egl::NONE as usize,
+            ];
+
+            let img = match egl.create_image(
+                egl_dpy,
+                egl::no_context(),
+                egl::LINUX_DMA_BUF_EXT,
+                egl::no_client_buffer(),
+                &attribs,
+            ) {
+                Ok(img) => img,
+                Err(e) => {
+                    log::warn!("eglCreateImage() failed: {}", e);
+                    return;
+                }
+            };
+
+            unsafe {
+                gl::BindTexture(gl::TEXTURE_2D, self_.texture_id());
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as _);
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as _);
+                egl_image_target(gl::TEXTURE_2D, img.as_ptr() as gl::types::GLeglImageOES);
+            }
+
+            self_.dmabuf.replace(Some(s));
+
+            if let Err(e) = egl.destroy_image(egl_dpy, img) {
+                log::warn!("eglDestroyImage() failed: {}", e);
+            }
         }
     }
 
     fn render(&self) {
         // Safety: safe because IsA<Display>
-        let self_ = imp::Display::from_instance(unsafe { self.unsafe_cast_ref::<Display>() });
-        let _ctx = self_.make_current();
+        let self_: &Display = unsafe { self.unsafe_cast_ref::<Display>() };
 
+        #[cfg(feature = "bindings")]
         unsafe {
-            gl::ClearColor(0.1, 0.1, 0.1, 1.0);
-            gl::Clear(gl::COLOR_BUFFER_BIT);
-            gl::Disable(gl::BLEND);
-
-            if let Some(vp) = self_.viewport() {
-                gl::Viewport(vp.x, vp.y, vp.width, vp.height);
-                let flip = self_.dmabuf.borrow().as_ref().map_or(false, |d| d.y0_top);
-                self_.texture_blit(flip);
-            }
+            ffi::rdw_display_render(self_.to_glib_none().0);
         }
+        #[cfg(not(feature = "bindings"))]
+        {
+            let self_ = imp::Display::from_instance(self_);
+            let _ctx = self_.make_current();
 
-        self_.gl_area().queue_draw();
+            unsafe {
+                gl::ClearColor(0.1, 0.1, 0.1, 1.0);
+                gl::Clear(gl::COLOR_BUFFER_BIT);
+                gl::Disable(gl::BLEND);
+
+                if let Some(vp) = self_.viewport() {
+                    gl::Viewport(vp.x, vp.y, vp.width, vp.height);
+                    let flip = self_.dmabuf.borrow().as_ref().map_or(false, |d| d.y0_top);
+                    self_.texture_blit(flip);
+                }
+            }
+
+            self_.gl_area().queue_draw();
+        }
     }
 
     fn set_alternative_text(&self, alt_text: &str) {
@@ -1294,7 +1379,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         f: F,
     ) -> SignalHandlerId {
         unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, u32, u32, KeyEvent) + 'static>(
-            this: *mut imp::RdwDisplay,
+            this: *mut RdwDisplay,
             keyval: u32,
             keycode: u32,
             event: KeyEvent,
@@ -1323,7 +1408,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
 
     fn connect_motion<F: Fn(&Self, f64, f64) + 'static>(&self, f: F) -> SignalHandlerId {
         unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, f64, f64) + 'static>(
-            this: *mut imp::RdwDisplay,
+            this: *mut RdwDisplay,
             x: f64,
             y: f64,
             f: glib::ffi::gpointer,
@@ -1350,7 +1435,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
 
     fn connect_motion_relative<F: Fn(&Self, f64, f64) + 'static>(&self, f: F) -> SignalHandlerId {
         unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, f64, f64) + 'static>(
-            this: *mut imp::RdwDisplay,
+            this: *mut RdwDisplay,
             dx: f64,
             dy: f64,
             f: glib::ffi::gpointer,
@@ -1377,7 +1462,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
 
     fn connect_mouse_press<F: Fn(&Self, u32) + 'static>(&self, f: F) -> SignalHandlerId {
         unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, u32) + 'static>(
-            this: *mut imp::RdwDisplay,
+            this: *mut RdwDisplay,
             button: u32,
             f: glib::ffi::gpointer,
         ) where
@@ -1402,7 +1487,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
 
     fn connect_mouse_release<F: Fn(&Self, u32) + 'static>(&self, f: F) -> SignalHandlerId {
         unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, u32) + 'static>(
-            this: *mut imp::RdwDisplay,
+            this: *mut RdwDisplay,
             button: u32,
             f: glib::ffi::gpointer,
         ) where
@@ -1427,7 +1512,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
 
     fn connect_scroll_discrete<F: Fn(&Self, Scroll) + 'static>(&self, f: F) -> SignalHandlerId {
         unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, Scroll) + 'static>(
-            this: *mut imp::RdwDisplay,
+            this: *mut RdwDisplay,
             scroll: Scroll,
             f: glib::ffi::gpointer,
         ) where
@@ -1452,7 +1537,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
 
     fn connect_property_grabbed_notify<F: Fn(&Self) + 'static>(&self, f: F) -> SignalHandlerId {
         unsafe extern "C" fn notify_trampoline<P, F: Fn(&P) + 'static>(
-            this: *mut imp::RdwDisplay,
+            this: *mut RdwDisplay,
             _param_spec: glib::ffi::gpointer,
             f: glib::ffi::gpointer,
         ) where
@@ -1478,7 +1563,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         f: F,
     ) -> SignalHandlerId {
         unsafe extern "C" fn connect_trampoline<P, F: Fn(&P, u32, u32, u32, u32) + 'static>(
-            this: *mut imp::RdwDisplay,
+            this: *mut RdwDisplay,
             width: u32,
             height: u32,
             width_mm: u32,
@@ -1524,6 +1609,60 @@ unsafe impl<T: DisplayImpl> IsSubclassable<T> for Display {
     }
 }
 
+#[cfg(not(feature = "bindings"))]
 glib::wrapper! {
     pub struct Display(ObjectSubclass<imp::Display>) @extends gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+}
+
+/// cbindgen:ignore
+#[cfg(feature = "bindings")]
+mod ffi {
+    use super::*;
+
+    extern "C" {
+        pub fn rdw_display_get_type() -> glib::ffi::GType;
+
+        pub fn rdw_display_get_display_size(
+            dpy: *mut RdwDisplay,
+            width: *mut usize,
+            height: *mut usize,
+        ) -> bool;
+
+        pub fn rdw_display_set_display_size(dpy: *mut RdwDisplay, width: usize, height: usize);
+
+        pub fn rdw_display_define_cursor(dpy: *mut RdwDisplay, cursor: *const gdk::ffi::GdkCursor);
+
+        pub fn rdw_display_set_cursor_position(
+            dpy: *mut RdwDisplay,
+            enabled: bool,
+            x: usize,
+            y: usize,
+        );
+
+        pub fn rdw_display_update_area(
+            dpy: *mut RdwDisplay,
+            x: i32,
+            y: i32,
+            w: i32,
+            h: i32,
+            stride: i32,
+            data: *const u8,
+        );
+
+        pub fn rdw_display_render(dpy: *mut RdwDisplay);
+
+        pub fn rdw_display_set_dmabuf_scanout(
+            dpy: *mut RdwDisplay,
+            dmabuf: *const RdwDmabufScanout,
+        );
+    }
+}
+
+#[cfg(feature = "bindings")]
+glib::wrapper! {
+    pub struct Display(Object<RdwDisplay, RdwDisplayClass>) @extends gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+
+    match fn {
+        type_ => || ffi::rdw_display_get_type(),
+    }
 }

@@ -8,11 +8,13 @@ mod egl;
 mod error;
 mod gstaudio;
 mod usbredir;
+
+#[cfg(not(feature = "bindings"))]
 mod util;
 
 pub use content_provider::ContentProvider;
 pub use display::*;
-pub use egl::DmabufScanout;
+pub use egl::RdwDmabufScanout;
 pub use error::Error;
 pub use gstaudio::*;
 pub use usbredir::{Device as UsbDevice, UsbRedir};

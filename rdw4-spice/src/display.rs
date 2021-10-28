@@ -17,7 +17,7 @@ mod imp {
 
     #[repr(C)]
     pub struct RdwSpiceDisplayClass {
-        pub parent_class: rdw::imp::RdwDisplayClass,
+        pub parent_class: rdw::RdwDisplayClass,
     }
 
     unsafe impl ClassStruct for RdwSpiceDisplayClass {
@@ -26,7 +26,7 @@ mod imp {
 
     #[repr(C)]
     pub struct RdwSpiceDisplay {
-        parent: rdw::imp::RdwDisplay,
+        parent: rdw::RdwDisplay,
     }
 
     impl std::fmt::Debug for RdwSpiceDisplay {
@@ -316,7 +316,7 @@ mod imp {
                             log::debug!("notify::gl-scanout: {:?}", scanout);
 
                             if let Some(scanout) = scanout {
-                                obj.set_dmabuf_scanout(rdw::DmabufScanout {
+                                obj.set_dmabuf_scanout(rdw::RdwDmabufScanout {
                                     width: scanout.width(),
                                     height: scanout.height(),
                                     stride: scanout.stride(),

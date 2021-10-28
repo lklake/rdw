@@ -50,8 +50,13 @@ fn main() {
             .with_gobject(true)
             .with_include_version(true)
             .with_include_guard(format!("{}_H", name.to_uppercase()))
+            .with_sys_include("gtk/gtk.h")
             .generate()
             .unwrap()
             .write_to_file(out_include.join(format!("{}.h", name)));
+    }
+
+    if cfg!(feature = "bindings") {
+        println!("cargo:rustc-link-lib=dylib=rdw4");
     }
 }

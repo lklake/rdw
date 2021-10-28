@@ -18,7 +18,7 @@ mod imp {
 
     #[repr(C)]
     pub struct RdwVncDisplayClass {
-        pub parent_class: rdw::imp::RdwDisplayClass,
+        pub parent_class: rdw::RdwDisplayClass,
     }
 
     unsafe impl ClassStruct for RdwVncDisplayClass {
@@ -27,7 +27,7 @@ mod imp {
 
     #[repr(C)]
     pub struct RdwVncDisplay {
-        parent: rdw::imp::RdwDisplay,
+        parent: rdw::RdwDisplay,
     }
 
     impl std::fmt::Debug for RdwVncDisplay {
