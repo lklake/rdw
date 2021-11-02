@@ -4,7 +4,13 @@ version = "0.1.0"
 authors = ["Marc-André Lureau <marcandre.lureau@redhat.com>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = []
+capi = []
+
+[build-dependencies]
+cargo_metadata = "0.13.1"
+cbindgen = { path = "../cbindgen", features = ["gobject"] }
 
 [dependencies]
 log = "0.4"
@@ -15,3 +21,15 @@ spice-client-glib = "0.1.0"
 rdw = { package = "rdw4", path = "../rdw4", features = ["bindings"] }
 keycodemap = { package = "rdw-keycodemap", path = "../keycodemap", version = "0.1" }
 futures = "0.3.13"
+
+[package.metadata.capi.library]
+name = "rdw4-spice"
+
+[package.metadata.capi.header]
+name = "rdw-spice"
+subdirectory = "rdw4"
+generation = false
+
+[package.metadata.capi.pkg_config]
+filename = "rdw4-spice"
+requires = "rdw4"

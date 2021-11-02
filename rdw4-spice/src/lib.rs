@@ -8,3 +8,6 @@ mod usbredir;
 pub use usbredir::*;
 
 mod util;
+
+#[cfg(feature = "capi")]
+mod capi;

@@ -9,11 +9,11 @@ use spice_client_glib as spice;
 use std::os::unix::io::IntoRawFd;
 
 mod imp {
-    use crate::util;
-    use std::cell::{Cell, RefCell};
-
     use super::*;
+    use crate::util;
     use gtk::subclass::prelude::*;
+    use once_cell::sync::Lazy;
+    use std::cell::{Cell, RefCell};
 
     #[repr(C)]
     pub struct RdwSpiceDisplayClass {
@@ -21,7 +21,7 @@ mod imp {
     }
 
     unsafe impl ClassStruct for RdwSpiceDisplayClass {
-        type Type = SpiceDisplay;
+        type Type = Display;
     }
 
     #[repr(C)]
@@ -38,7 +38,7 @@ mod imp {
     }
 
     unsafe impl InstanceStruct for RdwSpiceDisplay {
-        type Type = SpiceDisplay;
+        type Type = Display;
     }
 
     #[derive(Default)]
@@ -53,7 +53,7 @@ mod imp {
     }
 
     #[derive(Default)]
-    pub struct SpiceDisplay {
+    pub struct Display {
         pub(crate) session: spice::Session,
         pub(crate) monitor_config: Cell<Option<spice::DisplayMonitorConfig>>,
         pub(crate) main: glib::WeakRef<spice::MainChannel>,
@@ -65,7 +65,7 @@ mod imp {
     }
 
     #[glib::object_subclass]
-    impl ObjectSubclass for SpiceDisplay {
+    impl ObjectSubclass for Display {
         const NAME: &'static str = "RdwSpiceDisplay";
         type Type = super::Display;
         type ParentType = rdw::Display;
@@ -73,7 +73,41 @@ mod imp {
         type Instance = RdwSpiceDisplay;
     }
 
-    impl ObjectImpl for SpiceDisplay {
+    impl ObjectImpl for Display {
+        fn properties() -> &'static [glib::ParamSpec] {
+            use glib::ParamFlags as Flags;
+
+            static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
+                vec![glib::ParamSpec::new_object(
+                    "session",
+                    "Session",
+                    "Spice client session",
+                    spice::Session::static_type(),
+                    Flags::READABLE,
+                )]
+            });
+            PROPERTIES.as_ref()
+        }
+
+        fn set_property(
+            &self,
+            _obj: &Self::Type,
+            _id: usize,
+            _value: &glib::Value,
+            pspec: &glib::ParamSpec,
+        ) {
+            match pspec.name() {
+                _ => unimplemented!(),
+            }
+        }
+
+        fn property(&self, _obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+            match pspec.name() {
+                "session" => self.session.to_value(),
+                _ => unimplemented!(),
+            }
+        }
+
         fn constructed(&self, obj: &Self::Type) {
             self.parent_constructed(obj);
 
@@ -407,7 +441,7 @@ mod imp {
         }
     }
 
-    impl WidgetImpl for SpiceDisplay {
+    impl WidgetImpl for Display {
         fn realize(&self, widget: &Self::Type) {
             self.parent_realize(widget);
 
@@ -416,9 +450,9 @@ mod imp {
         }
     }
 
-    impl rdw::DisplayImpl for SpiceDisplay {}
+    impl rdw::DisplayImpl for Display {}
 
-    impl SpiceDisplay {
+    impl Display {
         fn add_clipboard_watch(&self, selection: u32) {
             let obj = self.instance();
 
@@ -581,7 +615,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct Display(ObjectSubclass<imp::SpiceDisplay>) @extends rdw::Display, gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+    pub struct Display(ObjectSubclass<imp::Display>) @extends rdw::Display, gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl Display {
@@ -590,7 +624,7 @@ impl Display {
     }
 
     pub fn session(&self) -> &spice::Session {
-        let self_ = imp::SpiceDisplay::from_instance(self);
+        let self_ = imp::Display::from_instance(self);
 
         &self_.session
     }
