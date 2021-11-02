@@ -7,14 +7,14 @@ use keycodemap::KEYMAP_XORGEVDEV2QNUM;
 use rdw::DisplayExt;
 
 mod imp {
+    use super::*;
+    use crate::framebuffer::*;
+    use gtk::subclass::prelude::*;
+    use once_cell::sync::Lazy;
     use std::{
         cell::{Cell, RefCell},
         convert::TryInto,
     };
-
-    use super::*;
-    use crate::framebuffer::*;
-    use gtk::subclass::prelude::*;
 
     #[repr(C)]
     pub struct RdwVncDisplayClass {
@@ -22,7 +22,7 @@ mod imp {
     }
 
     unsafe impl ClassStruct for RdwVncDisplayClass {
-        type Type = VncDisplay;
+        type Type = Display;
     }
 
     #[repr(C)]
@@ -39,11 +39,11 @@ mod imp {
     }
 
     unsafe impl InstanceStruct for RdwVncDisplay {
-        type Type = VncDisplay;
+        type Type = Display;
     }
 
     #[derive(Debug)]
-    pub struct VncDisplay {
+    pub struct Display {
         pub(crate) connection: gvnc::Connection,
         pub(crate) fb: RefCell<Option<Framebuffer>>,
         pub(crate) keycode_map: bool,
@@ -52,7 +52,7 @@ mod imp {
         pub(crate) last_button_mask: Cell<Option<u8>>,
     }
 
-    impl Default for VncDisplay {
+    impl Default for Display {
         fn default() -> Self {
             Self {
                 connection: gvnc::Connection::new(),
@@ -66,7 +66,7 @@ mod imp {
     }
 
     #[glib::object_subclass]
-    impl ObjectSubclass for VncDisplay {
+    impl ObjectSubclass for Display {
         const NAME: &'static str = "RdwVncDisplay";
         type Type = super::Display;
         type ParentType = rdw::Display;
@@ -74,7 +74,41 @@ mod imp {
         type Instance = RdwVncDisplay;
     }
 
-    impl ObjectImpl for VncDisplay {
+    impl ObjectImpl for Display {
+        fn properties() -> &'static [glib::ParamSpec] {
+            use glib::ParamFlags as Flags;
+
+            static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
+                vec![glib::ParamSpec::new_object(
+                    "connection",
+                    "Connection",
+                    "gvnc connection",
+                    gvnc::Connection::static_type(),
+                    Flags::READABLE,
+                )]
+            });
+            PROPERTIES.as_ref()
+        }
+
+        fn set_property(
+            &self,
+            _obj: &Self::Type,
+            _id: usize,
+            _value: &glib::Value,
+            pspec: &glib::ParamSpec,
+        ) {
+            match pspec.name() {
+                _ => unimplemented!(),
+            }
+        }
+
+        fn property(&self, _obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+            match pspec.name() {
+                "connection" => self.connection.to_value(),
+                _ => unimplemented!(),
+            }
+        }
+
         fn constructed(&self, obj: &Self::Type) {
             self.parent_constructed(obj);
 
@@ -251,11 +285,11 @@ mod imp {
         }
     }
 
-    impl WidgetImpl for VncDisplay {}
+    impl WidgetImpl for Display {}
 
-    impl rdw::DisplayImpl for VncDisplay {}
+    impl rdw::DisplayImpl for Display {}
 
-    impl VncDisplay {
+    impl Display {
         fn last_button_mask(&self) -> u8 {
             self.last_button_mask.get().unwrap_or(0)
         }
@@ -395,7 +429,7 @@ mod imp {
 }
 
 glib::wrapper! {
-    pub struct Display(ObjectSubclass<imp::VncDisplay>) @extends rdw::Display, gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+    pub struct Display(ObjectSubclass<imp::Display>) @extends rdw::Display, gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl Display {
@@ -404,7 +438,7 @@ impl Display {
     }
 
     pub fn connection(&self) -> &gvnc::Connection {
-        let self_ = imp::VncDisplay::from_instance(self);
+        let self_ = imp::Display::from_instance(self);
 
         &self_.connection
     }

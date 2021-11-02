@@ -1,7 +1,7 @@
-HEADER = inst/usr/include/rdw4/rdw.h
-GIR = inst/usr/share/gir-1.0/Rdw-4.0.gir
-TYPELIB = inst/usr/lib64/girepository-1.0/Rdw-4.0.typelib
-VAPI = inst/usr/share/vala/vapi/rdw4.vapi
+HEADER = inst/usr/include/rdw4/rdw-vnc.h
+GIR = inst/usr/share/gir-1.0/RdwVnc-4.0.gir
+TYPELIB = inst/usr/lib64/girepository-1.0/RdwVnc-4.0.typelib
+VAPI = inst/usr/share/vala/vapi/rdw4-vnc.vapi
 
 RUST_SOURCES = $(shell find src)
 
@@ -17,11 +17,12 @@ $(HEADER): $(RUST_SOURCES)
 $(GIR): $(HEADER)
 	mkdir -p $(@D)
 	g-ir-scanner -v --warn-all \
-		--namespace Rdw --nsversion=4.0 \
-		--identifier-prefix Rdw \
-		-Iinst/include --c-include "rdw.h" \
-		--library=rdw4 --library-path=inst/usr/lib64 \
-		--include=Gtk-4.0 --pkg gtk4 \
+		--namespace RdwVnc --nsversion=4.0 \
+		--identifier-prefix RdwVnc \
+		-Iinst/include --c-include "rdw-vnc.h" \
+		--library=rdw4-vnc --library-path=inst/usr/lib64 \
+		--include=GVnc-1.0 --pkg gvnc-1.0 \
+		--include=Rdw-4.0 --pkg rdw4 \
 		--output $@ \
 		$<
 
@@ -32,10 +33,12 @@ $(TYPELIB): $(GIR)
 $(VAPI): $(GIR)
 	mkdir -p $(@D)
 	vapigen \
-		--pkg gtk4 \
-		--library rdw4 \
+		--pkg gvnc-1.0 \
+		--pkg rdw4 \
+		--library rdw4-vnc \
 		$< -d $(@D)
-	echo gtk4 > $(@D)/rdw4.deps
+	echo rdw4 > $(@D)/rdw4-vnc.deps
+	echo gvnc-1.0 >> $(@D)/rdw4-vnc.deps
 
 install: $(HEADER)
 	sudo cp -r inst/* $(DESTDIR)/

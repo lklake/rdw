@@ -5,3 +5,6 @@ mod display;
 pub use display::*;
 
 mod framebuffer;
+
+#[cfg(feature = "capi")]
+mod capi;

@@ -4,6 +4,7 @@ use rdw::gtk;
 
 use gvnc::{prelude::*, subclass::base_framebuffer::*};
 
+/// cbindgen::ignore
 mod imp {
     use super::*;
     use gtk::subclass::prelude::*;
@@ -27,6 +28,7 @@ mod imp {
 }
 
 glib::wrapper! {
+    // FIXME: make it pub(crate)
     pub struct Framebuffer(ObjectSubclass<imp::Framebuffer>) @extends gvnc::BaseFramebuffer, @implements gvnc::Framebuffer;
 }
 
