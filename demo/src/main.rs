@@ -29,6 +29,24 @@ fn show_error(app: gtk::Application, msg: &str) {
     glib::MainContext::default().spawn_local(run_dialog);
 }
 
+fn rdp_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
+    let mut rdp = rdw_rdp::Display::new();
+
+    let mut port = uri.port();
+    if port == -1 {
+        port = 3389;
+    }
+    let host = uri.host().unwrap_or_else(|| "localhost".into());
+
+    rdp.rdp_settings().set_server_port(port as _);
+    rdp.rdp_settings()
+        .set_server_hostname(Some(host.as_str()))
+        .unwrap();
+    rdp.rdp_connect().unwrap();
+
+    rdp.upcast()
+}
+
 fn vnc_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
     let has_error = Arc::new(AtomicBool::new(false));
 
@@ -146,6 +164,7 @@ fn make_display(app: &gtk::Application, mut uri: String) -> rdw::Display {
 
     match uri.scheme().as_str() {
         "vnc" => vnc_display(app, uri),
+        "rdp" => rdp_display(app, uri),
         spice if spice.starts_with("spice") => spice_display(app, uri),
         scheme => panic!("Unhandled scheme {}", scheme),
     }

@@ -3,6 +3,7 @@ members = [
     "demo",
     "keycodemap",
     "rdw4",
+    "rdw4-rdp",
     "rdw4-spice",
     "rdw4-vnc",
     "xtask",
@@ -12,3 +13,6 @@ exclude = [
 ]
 
 default-members = ["demo"]
+
+[patch.crates-io]
+freerdp2 = { git = "https://github.com/elmarco/freerdp-rs.git" }

@@ -8,5 +8,6 @@ edition = "2018"
 
 [dependencies]
 env_logger = { version = "0.7", default-features = false }
-rdw-vnc = { package = "rdw4-vnc", path = "../rdw4-vnc" }
+rdw-rdp = { package = "rdw4-rdp", path = "../rdw4-rdp" }
 rdw-spice = { package = "rdw4-spice", path = "../rdw4-spice" }
+rdw-vnc = { package = "rdw4-vnc", path = "../rdw4-vnc" }
