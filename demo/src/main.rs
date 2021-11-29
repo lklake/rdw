@@ -11,7 +11,7 @@ use glib::{clone, translate::IntoGlib};
 use gtk::{gdk, gio, glib, prelude::*};
 use rdw::{gtk, DisplayExt};
 use rdw_spice::spice::{self, prelude::*};
-use rdw_vnc::{gvnc, rdw};
+use rdw_vnc::gvnc;
 
 fn show_error(app: gtk::Application, msg: &str) {
     let mut dialog = gtk::MessageDialogBuilder::new()

@@ -151,21 +151,3 @@ pub extern "C" fn rdw_usb_device_get_type() -> glib::ffi::GType {
     gtk::init().unwrap();
     <crate::UsbDevice as glib::types::StaticType>::static_type().into_glib()
 }
-
-#[no_mangle]
-pub extern "C" fn rdw_key_event_get_type() -> glib::ffi::GType {
-    gtk::init().unwrap();
-    <crate::KeyEvent as glib::types::StaticType>::static_type().into_glib()
-}
-
-#[no_mangle]
-pub extern "C" fn rdw_scroll_get_type() -> glib::ffi::GType {
-    gtk::init().unwrap();
-    <crate::Scroll as glib::types::StaticType>::static_type().into_glib()
-}
-
-#[no_mangle]
-pub extern "C" fn rdw_grab_get_type() -> glib::ffi::GType {
-    gtk::init().unwrap();
-    <crate::Grab as glib::types::StaticType>::static_type().into_glib()
-}

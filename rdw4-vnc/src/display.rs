@@ -341,6 +341,7 @@ mod imp {
                 rdw::Scroll::Down => 5,
                 rdw::Scroll::Left => 6,
                 rdw::Scroll::Right => 7,
+                _ => return,
             };
             self.button_event(true, n);
             self.button_event(false, n);
