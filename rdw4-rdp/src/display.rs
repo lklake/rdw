@@ -1,14 +1,16 @@
-use std::{cell::RefMut, convert::TryFrom, os::unix::prelude::RawFd, thread};
+use std::{
+    cell::RefMut, convert::TryFrom, os::unix::prelude::RawFd, sync::Arc, thread, time::Duration,
+};
 
 use freerdp::{
     locale::keyboard_init_ex,
     update,
-    winpr::{wait_for_multiple_objects, FdMode, Handle},
+    winpr::{wait_for_multiple_objects, FdMode, Handle, WaitResult},
     RdpError, Result, PIXEL_FORMAT_BGRA32,
 };
 use glib::{clone, subclass::prelude::*, translate::*};
 use gtk::{gio, glib, prelude::*};
-use rdw::gtk;
+use rdw::gtk::{self, gio::NONE_CANCELLABLE};
 
 use keycodemap::KEYMAP_XORGEVDEV2QNUM;
 use rdw::DisplayExt;
@@ -53,7 +55,7 @@ mod imp {
     #[derive(Debug)]
     pub struct Display {
         pub(crate) context: Arc<Mutex<freerdp::client::Context<RdpContextHandler>>>,
-        pub(crate) thread: OnceCell<JoinHandle<()>>,
+        pub(crate) thread: OnceCell<JoinHandle<Result<()>>>,
         pub(crate) notifier: Notifier,
     }
 
@@ -111,7 +113,11 @@ mod imp {
 
             obj.connect_key_event(clone!(@weak obj => move |_, keyval, keycode, event| {
                 let self_ = Self::from_instance(&obj);
-                log::debug!("key-press: {:?}", (keyval, keycode));
+                log::debug!("key-event: {:?}", (keyval, keycode));
+                glib::MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
+                    let self_ = Self::from_instance(&obj);
+                    let _ = self_.notifier.notify().await;
+                }));
             }));
 
             obj.connect_motion(clone!(@weak obj => move |_, x, y| {
@@ -172,17 +178,22 @@ impl Display {
 
     pub fn rdp_connect(&mut self) {
         let self_ = imp::Display::from_instance(self);
-        let notifier = self_.notifier.handle();
+        let notifier = self_.notifier.clone();
         let context = self_.context.clone();
         let thread = thread::spawn(move || {
             let mut ctxt = context.lock().unwrap();
-            ctxt.instance.connect();
+            ctxt.instance.connect()?;
 
+            let notifier_handle = notifier.handle();
             while !ctxt.instance.shall_disconnect() {
                 let handles = ctxt.event_handles().unwrap();
                 let mut handles: Vec<_> = handles.iter().collect();
-                handles.push(&notifier);
+                handles.push(&notifier_handle);
                 wait_for_multiple_objects(&handles, false, None).unwrap();
+
+                if let WaitResult::Object(_) = notifier_handle.wait(Some(&Duration::ZERO))? {
+                    notifier.read_sync()?;
+                }
 
                 if !ctxt.check_event_handles() {
                     if let Err(e) = ctxt.last_error() {
@@ -191,9 +202,10 @@ impl Display {
                     }
                 }
             }
+            Ok(())
         });
 
-        self_.thread.set(thread);
+        self_.thread.set(thread).unwrap();
     }
 }
 
@@ -316,14 +328,19 @@ impl freerdp::client::Handler for RdpContextHandler {
 }
 
 #[derive(Debug)]
-pub(crate) struct Notifier {
+struct NotifierInner {
     fd: RawFd,
 }
 
-impl Drop for Notifier {
+impl Drop for NotifierInner {
     fn drop(&mut self) {
         let _ = nix::unistd::close(self.fd);
     }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct Notifier {
+    inner: Arc<NotifierInner>,
 }
 
 impl Notifier {
@@ -333,19 +350,29 @@ impl Notifier {
         let fd = eventfd(0, EfdFlags::EFD_CLOEXEC | EfdFlags::EFD_NONBLOCK)
             .map_err(|e| RdpError::Failed(format!("eventfd failed: {}", e)))?;
 
-        Ok(Self { fd })
+        Ok(Self {
+            inner: Arc::new(NotifierInner { fd }),
+        })
     }
 
     fn handle(&self) -> Handle {
-        Handle::new_fd_event(&[], false, false, self.fd, FdMode::READ)
+        Handle::new_fd_event(&[], false, false, self.inner.fd, FdMode::READ)
     }
 
     async fn notify(&self) -> Result<()> {
-        let st = unsafe { gio::UnixOutputStream::with_fd(self.fd) };
+        let st = unsafe { gio::UnixOutputStream::with_fd(self.inner.fd) };
         let buffer = 1u64.to_ne_bytes();
         st.write_all_async_future(buffer, glib::Priority::default())
             .await
             .map_err(|e| RdpError::Failed(format!("notify() failed")))?;
+        Ok(())
+    }
+
+    fn read_sync(&self) -> Result<()> {
+        let st = unsafe { gio::UnixInputStream::with_fd(self.inner.fd) };
+        let buffer = 1u64.to_ne_bytes();
+        st.read_all(buffer, NONE_CANCELLABLE)
+            .map_err(|e| RdpError::Failed(format!("read() failed")))?;
         Ok(())
     }
 }

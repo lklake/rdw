@@ -16,4 +16,4 @@ default-members = ["demo"]
 
 [patch.crates-io]
 #freerdp2 = { git = "https://github.com/elmarco/freerdp-rs.git" }
-freerdp2 = { path = "/home/elmarco/src/freerdp-rs/freerdp2" }
+freerdp2 = { path = "../freerdp-rs/freerdp2" }
