@@ -1,5 +1,9 @@
 use std::{
-    cell::RefMut, convert::TryFrom, os::unix::prelude::RawFd, sync::Arc, thread, time::Duration,
+    convert::TryFrom,
+    os::unix::prelude::RawFd,
+    sync::{mpsc, Arc},
+    thread,
+    time::Duration,
 };
 
 use freerdp::{
@@ -12,19 +16,23 @@ use glib::{clone, subclass::prelude::*, translate::*};
 use gtk::{gio, glib, prelude::*};
 use rdw::gtk::{self, gio::NONE_CANCELLABLE};
 
-use keycodemap::KEYMAP_XORGEVDEV2QNUM;
+// use keycodemap::KEYMAP_XORGEVDEV2QNUM;
 use rdw::DisplayExt;
 
 mod imp {
     use super::*;
+    use freerdp::input::KbdFlags;
     use gtk::subclass::prelude::*;
     use once_cell::sync::{Lazy, OnceCell};
     use std::{
-        cell::{Cell, RefCell},
-        convert::TryInto,
-        sync::{Arc, LockResult, Mutex, MutexGuard},
+        sync::{mpsc::Sender, Arc, Mutex},
         thread::JoinHandle,
     };
+
+    #[derive(Debug)]
+    enum Event {
+        Keyboard(KbdFlags, u16),
+    }
 
     #[repr(C)]
     pub struct RdwRdpDisplayClass {
@@ -55,8 +63,9 @@ mod imp {
     #[derive(Debug)]
     pub struct Display {
         pub(crate) context: Arc<Mutex<freerdp::client::Context<RdpContextHandler>>>,
-        pub(crate) thread: OnceCell<JoinHandle<Result<()>>>,
-        pub(crate) notifier: Notifier,
+        thread: OnceCell<JoinHandle<Result<()>>>,
+        tx: OnceCell<Sender<Event>>,
+        notifier: Notifier,
     }
 
     impl Default for Display {
@@ -66,6 +75,7 @@ mod imp {
                     RdpContextHandler { test: 42 },
                 ))),
                 thread: OnceCell::new(),
+                tx: OnceCell::new(),
                 notifier: Notifier::new().unwrap(),
             }
         }
@@ -116,7 +126,9 @@ mod imp {
                 log::debug!("key-event: {:?}", (keyval, keycode));
                 glib::MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
                     let self_ = Self::from_instance(&obj);
-                    let _ = self_.notifier.notify().await;
+                    let flags = KbdFlags::empty();
+                    let code = 0;
+                    let _ = self_.send_event(Event::Keyboard(flags, code)).await;
                 }));
             }));
 
@@ -155,7 +167,56 @@ mod imp {
 
     impl rdw::DisplayImpl for Display {}
 
-    impl Display {}
+    impl Display {
+        pub(crate) fn connect(&self) {
+            let notifier = self.notifier.clone();
+            let context = self.context.clone();
+            let (tx, rx) = mpsc::channel();
+            self.tx.set(tx).unwrap();
+            let thread = thread::spawn(move || {
+                let mut ctxt = context.lock().unwrap();
+                ctxt.instance.connect()?;
+
+                let notifier_handle = notifier.handle();
+                while !ctxt.instance.shall_disconnect() {
+                    let handles = ctxt.event_handles().unwrap();
+                    let mut handles: Vec<_> = handles.iter().collect();
+                    handles.push(&notifier_handle);
+                    wait_for_multiple_objects(&handles, false, None).unwrap();
+
+                    if let WaitResult::Object(_) = notifier_handle.wait(Some(&Duration::ZERO))? {
+                        match rx.recv() {
+                            Ok(e) => {
+                                dbg!(e);
+                            }
+                            _ => return Err(RdpError::Failed("recv() failed!".into())),
+                        }
+                        notifier.read_sync()?;
+                    }
+
+                    if !ctxt.check_event_handles() {
+                        if let Err(e) = ctxt.last_error() {
+                            eprintln!("{}", e);
+                            break;
+                        }
+                    }
+                }
+                Ok(())
+            });
+
+            self.thread.set(thread).unwrap();
+        }
+
+        async fn send_event(&self, event: Event) -> Result<()> {
+            if let Some(tx) = self.tx.get() {
+                tx.send(event)
+                    .map_err(|_| RdpError::Failed("send() failed!".into()))?;
+                self.notifier.notify().await
+            } else {
+                Err(RdpError::Failed("No event channel!".into()))
+            }
+        }
+    }
 }
 
 glib::wrapper! {
@@ -178,34 +239,8 @@ impl Display {
 
     pub fn rdp_connect(&mut self) {
         let self_ = imp::Display::from_instance(self);
-        let notifier = self_.notifier.clone();
-        let context = self_.context.clone();
-        let thread = thread::spawn(move || {
-            let mut ctxt = context.lock().unwrap();
-            ctxt.instance.connect()?;
 
-            let notifier_handle = notifier.handle();
-            while !ctxt.instance.shall_disconnect() {
-                let handles = ctxt.event_handles().unwrap();
-                let mut handles: Vec<_> = handles.iter().collect();
-                handles.push(&notifier_handle);
-                wait_for_multiple_objects(&handles, false, None).unwrap();
-
-                if let WaitResult::Object(_) = notifier_handle.wait(Some(&Duration::ZERO))? {
-                    notifier.read_sync()?;
-                }
-
-                if !ctxt.check_event_handles() {
-                    if let Err(e) = ctxt.last_error() {
-                        eprintln!("{}", e);
-                        break;
-                    }
-                }
-            }
-            Ok(())
-        });
-
-        self_.thread.set(thread).unwrap();
+        self_.connect();
     }
 }
 
