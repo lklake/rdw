@@ -1,11 +1,13 @@
-use std::{cell::RefMut, convert::TryFrom};
+use std::{cell::RefMut, convert::TryFrom, os::unix::prelude::RawFd, thread};
 
 use freerdp::{
-    locale::keyboard_init_ex, update, winpr::wait_for_multiple_objects, RdpError, Result,
-    PIXEL_FORMAT_BGRA32,
+    locale::keyboard_init_ex,
+    update,
+    winpr::{wait_for_multiple_objects, FdMode, Handle},
+    RdpError, Result, PIXEL_FORMAT_BGRA32,
 };
 use glib::{clone, subclass::prelude::*, translate::*};
-use gtk::{glib, prelude::*};
+use gtk::{gio, glib, prelude::*};
 use rdw::gtk;
 
 use keycodemap::KEYMAP_XORGEVDEV2QNUM;
@@ -14,10 +16,12 @@ use rdw::DisplayExt;
 mod imp {
     use super::*;
     use gtk::subclass::prelude::*;
-    use once_cell::sync::Lazy;
+    use once_cell::sync::{Lazy, OnceCell};
     use std::{
         cell::{Cell, RefCell},
         convert::TryInto,
+        sync::{Arc, LockResult, Mutex, MutexGuard},
+        thread::JoinHandle,
     };
 
     #[repr(C)]
@@ -48,15 +52,19 @@ mod imp {
 
     #[derive(Debug)]
     pub struct Display {
-        context: RefCell<freerdp::client::Context<RdpContextHandler>>,
+        pub(crate) context: Arc<Mutex<freerdp::client::Context<RdpContextHandler>>>,
+        pub(crate) thread: OnceCell<JoinHandle<()>>,
+        pub(crate) notifier: Notifier,
     }
 
     impl Default for Display {
         fn default() -> Self {
             Self {
-                context: RefCell::new(freerdp::client::Context::new(RdpContextHandler {
-                    test: 42,
-                })),
+                context: Arc::new(Mutex::new(freerdp::client::Context::new(
+                    RdpContextHandler { test: 42 },
+                ))),
+                thread: OnceCell::new(),
+                notifier: Notifier::new().unwrap(),
             }
         }
     }
@@ -72,7 +80,7 @@ mod imp {
 
     impl ObjectImpl for Display {
         fn properties() -> &'static [glib::ParamSpec] {
-            use glib::ParamFlags as Flags;
+            //use glib::ParamFlags as Flags;
 
             static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| vec![]);
             PROPERTIES.as_ref()
@@ -141,11 +149,7 @@ mod imp {
 
     impl rdw::DisplayImpl for Display {}
 
-    impl Display {
-        pub(crate) fn context_mut(&self) -> RefMut<freerdp::client::Context<RdpContextHandler>> {
-            self.context.borrow_mut()
-        }
-    }
+    impl Display {}
 }
 
 glib::wrapper! {
@@ -157,16 +161,39 @@ impl Display {
         glib::Object::new::<Self>(&[]).unwrap()
     }
 
-    pub fn rdp_settings(&mut self) -> RefMut<freerdp::Settings> {
+    pub fn with_settings(
+        &mut self,
+        f: impl FnOnce(&mut freerdp::Settings) -> Result<()>,
+    ) -> Result<()> {
         let self_ = imp::Display::from_instance(self);
 
-        RefMut::map(self_.context_mut(), |c| &mut c.settings)
+        f(&mut self_.context.lock().unwrap().settings)
     }
 
-    pub fn rdp_connect(&mut self) -> freerdp::Result<()> {
+    pub fn rdp_connect(&mut self) {
         let self_ = imp::Display::from_instance(self);
+        let notifier = self_.notifier.handle();
+        let context = self_.context.clone();
+        let thread = thread::spawn(move || {
+            let mut ctxt = context.lock().unwrap();
+            ctxt.instance.connect();
 
-        self_.context_mut().instance.connect()
+            while !ctxt.instance.shall_disconnect() {
+                let handles = ctxt.event_handles().unwrap();
+                let mut handles: Vec<_> = handles.iter().collect();
+                handles.push(&notifier);
+                wait_for_multiple_objects(&handles, false, None).unwrap();
+
+                if !ctxt.check_event_handles() {
+                    if let Err(e) = ctxt.last_error() {
+                        eprintln!("{}", e);
+                        break;
+                    }
+                }
+            }
+        });
+
+        self_.thread.set(thread);
     }
 }
 
@@ -284,6 +311,41 @@ impl freerdp::client::Handler for RdpContextHandler {
             context.settings.keyboard_remapping_list().as_deref(),
         );
 
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Notifier {
+    fd: RawFd,
+}
+
+impl Drop for Notifier {
+    fn drop(&mut self) {
+        let _ = nix::unistd::close(self.fd);
+    }
+}
+
+impl Notifier {
+    fn new() -> Result<Self> {
+        // TODO: non-Linux
+        use nix::sys::eventfd::*;
+        let fd = eventfd(0, EfdFlags::EFD_CLOEXEC | EfdFlags::EFD_NONBLOCK)
+            .map_err(|e| RdpError::Failed(format!("eventfd failed: {}", e)))?;
+
+        Ok(Self { fd })
+    }
+
+    fn handle(&self) -> Handle {
+        Handle::new_fd_event(&[], false, false, self.fd, FdMode::READ)
+    }
+
+    async fn notify(&self) -> Result<()> {
+        let st = unsafe { gio::UnixOutputStream::with_fd(self.fd) };
+        let buffer = 1u64.to_ne_bytes();
+        st.write_all_async_future(buffer, glib::Priority::default())
+            .await
+            .map_err(|e| RdpError::Failed(format!("notify() failed")))?;
         Ok(())
     }
 }

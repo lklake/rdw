@@ -29,7 +29,7 @@ fn show_error(app: gtk::Application, msg: &str) {
     glib::MainContext::default().spawn_local(run_dialog);
 }
 
-fn rdp_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
+fn rdp_display(_app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
     let mut rdp = rdw_rdp::Display::new();
 
     let mut port = uri.port();
@@ -38,11 +38,13 @@ fn rdp_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
     }
     let host = uri.host().unwrap_or_else(|| "localhost".into());
 
-    rdp.rdp_settings().set_server_port(port as _);
-    rdp.rdp_settings()
-        .set_server_hostname(Some(host.as_str()))
-        .unwrap();
-    rdp.rdp_connect().unwrap();
+    rdp.with_settings(|s| {
+        s.set_server_port(port as _);
+        s.set_server_hostname(Some(host.as_str()))?;
+        Ok(())
+    })
+    .unwrap();
+    rdp.rdp_connect();
 
     rdp.upcast()
 }
