@@ -29,22 +29,76 @@ fn show_error(app: gtk::Application, msg: &str) {
     glib::MainContext::default().spawn_local(run_dialog);
 }
 
-fn rdp_display(_app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
+async fn show_password_dialog(
+    app: gtk::Application,
+    with_username: bool,
+    with_password: bool,
+) -> (String, String) {
+    let mut dialog = gtk::MessageDialogBuilder::new()
+        .modal(true)
+        .buttons(gtk::ButtonsType::Ok)
+        .text("Credentials required");
+    if let Some(parent) = app.active_window() {
+        dialog = dialog.transient_for(&parent);
+    }
+    let dialog = dialog.build();
+    let content = dialog.content_area();
+    let grid = gtk::GridBuilder::new()
+        .hexpand(true)
+        .vexpand(true)
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .row_spacing(6)
+        .column_spacing(6)
+        .build();
+    content.append(&grid);
+    let username = gtk::Entry::new();
+    if with_username {
+        grid.attach(&gtk::Label::new(Some("Username")), 0, 0, 1, 1);
+        grid.attach(&username, 1, 0, 1, 1);
+    }
+    let password = gtk::Entry::new();
+    if with_password {
+        grid.attach(&gtk::Label::new(Some("Password")), 0, 1, 1, 1);
+        grid.attach(&password, 1, 1, 1, 1);
+    }
+    dialog.run_future().await;
+    dialog.destroy();
+    (username.text().into(), password.text().into())
+}
+
+fn rdp_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
     let mut rdp = rdw_rdp::Display::new();
 
-    let mut port = uri.port();
-    if port == -1 {
-        port = 3389;
-    }
+    let port = match uri.port() {
+        -1 => 3389,
+        port => port,
+    };
     let host = uri.host().unwrap_or_else(|| "localhost".into());
 
     rdp.with_settings(|s| {
         s.set_server_port(port as _);
         s.set_server_hostname(Some(host.as_str()))?;
+        s.set_remote_fx_codec(true);
+        // parse_command_line() sets some extra default stuff, clunky
+        s.parse_command_line(&["demo", "/rfx"], true)?;
         Ok(())
     })
     .unwrap();
-    rdp.rdp_connect();
+
+    rdp.connect_rdp_authenticate(clone!(@weak app => @default-return false, move |rdp| {
+        glib::MainContext::default().block_on(clone!(@weak app => async move {
+            let (username, password) = show_password_dialog(app, true, true).await;
+            let _ = rdp.with_settings(|s| {
+                s.set_username(Some(&username))?;
+                s.set_password(Some(&password))?;
+                Ok(())
+            });
+        }));
+        true
+    }));
+
+    rdp.rdp_connect().unwrap();
 
     rdp.upcast()
 }
@@ -52,10 +106,10 @@ fn rdp_display(_app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
 fn vnc_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
     let has_error = Arc::new(AtomicBool::new(false));
 
-    let mut port = uri.port();
-    if port == -1 {
-        port = 5900;
-    }
+    let port = match uri.port() {
+        -1 => 5900,
+        port => port,
+    };
     let host = uri.host().unwrap_or_else(|| "localhost".into());
     let vnc = rdw_vnc::Display::new();
     vnc.connection()
@@ -82,49 +136,18 @@ fn vnc_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
             use gvnc::ConnectionCredential::*;
 
             let creds: Vec<_> = va.iter().map(|v| v.get::<gvnc::ConnectionCredential>().unwrap()).collect();
-            let mut dialog = gtk::MessageDialogBuilder::new()
-                .modal(true)
-                .buttons(gtk::ButtonsType::Ok)
-                .text("Credentials required");
-            if let Some(parent) = app.active_window() {
-                dialog = dialog.transient_for(&parent);
-            }
-            let dialog = dialog.build();
-            let content = dialog.content_area();
-            let grid = gtk::GridBuilder::new()
-                .hexpand(true)
-                .vexpand(true)
-                .halign(gtk::Align::Center)
-                .valign(gtk::Align::Center)
-                .row_spacing(6)
-                .column_spacing(6)
-                .build();
-            content.append(&grid);
-            let username = gtk::Entry::new();
-            if creds.contains(&Username) {
-                grid.attach(&gtk::Label::new(Some("Username")), 0, 0, 1, 1);
-                grid.attach(&username, 1, 0, 1, 1);
-            }
-            let password = gtk::Entry::new();
-            if creds.contains(&Password) {
-                grid.attach(&gtk::Label::new(Some("Password")), 0, 1, 1, 1);
-                grid.attach(&password, 1, 1, 1, 1);
-            }
-            let run_dialog = clone!(@weak conn, @strong username, @strong password => async move {
-                dialog.run_future().await;
+            glib::MainContext::default().spawn_local(clone!(@weak conn => async move {
+                let (username, password) = show_password_dialog(app, creds.contains(&Username), creds.contains(&Password)).await;
                 if creds.contains(&Username) {
-                    conn.set_credential(Username.into_glib(), &username.text()).unwrap();
+                    conn.set_credential(Username.into_glib(), &username).unwrap();
                 }
                 if creds.contains(&Password) {
-                    conn.set_credential(Password.into_glib(), &password.text()).unwrap();
+                    conn.set_credential(Password.into_glib(), &password).unwrap();
                 }
                 if creds.contains(&Clientname) {
                     conn.set_credential(Clientname.into_glib(), "rdw-vnc").unwrap();
                 }
-                dialog.destroy();
-            });
-
-            glib::MainContext::default().spawn_local(run_dialog);
+            }));
         }));
 
     vnc.upcast()

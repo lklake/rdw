@@ -20,6 +20,7 @@ rdw = { package = "rdw4", path = "../rdw4", features = ["bindings"] }
 freerdp = { package = "freerdp2", version = "0.1" }
 keycodemap = { package = "rdw-keycodemap", path = "../keycodemap", version = "0.1" }
 nix = "0.23.0"
+futures = { version = "0.3.17", features = ["executor"] }
 
 [package.metadata.capi.library]
 name = "rdw4-rdp"
