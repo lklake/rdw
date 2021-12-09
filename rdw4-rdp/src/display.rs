@@ -7,13 +7,12 @@ use std::{
 };
 
 use freerdp::{
-    gdi::Gdi,
     locale::keyboard_init_ex,
     update,
     winpr::{wait_for_multiple_objects, FdMode, Handle, WaitResult},
     RdpError, Result, PIXEL_FORMAT_BGRA32,
 };
-use futures::{executor::block_on, pin_mut, stream::StreamExt, SinkExt};
+use futures::{executor::block_on, stream::StreamExt, SinkExt};
 use glib::{clone, subclass::prelude::*, translate::*, SignalHandlerId};
 use gtk::{gio, glib, prelude::*};
 use rdw::gtk::{self, gio::NONE_CANCELLABLE};
@@ -36,6 +35,7 @@ mod imp {
     use freerdp::input::{KbdFlags, PtrFlags, PtrXFlags, WHEEL_ROTATION_MASK};
     use glib::subclass::Signal;
     use gtk::subclass::prelude::*;
+    use keycodemap::KEYMAP_XORGEVDEV2XTKBD;
     use once_cell::sync::{Lazy, OnceCell};
     use rdw::gtk::{gdk, glib::MainContext};
     use std::{
@@ -144,20 +144,27 @@ mod imp {
             obj.set_mouse_absolute(true);
 
             obj.connect_key_event(clone!(@weak obj => move |_, keyval, keycode, event| {
-                let self_ = Self::from_instance(&obj);
                 log::debug!("key-event: {:?}", (keyval, keycode, event));
-                MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
-                    let self_ = Self::from_instance(&obj);
-                    let mut flags = KbdFlags::empty();
-                    if event.contains(rdw::KeyEvent::PRESS) {
-                        flags |= KbdFlags::DOWN;
-                    }
-                    if event.contains(rdw::KeyEvent::RELEASE) {
-                        flags |= KbdFlags::RELEASE;
-                    }
-                    let code = 0;
-                    let _ = self_.send_event(Event::Keyboard(flags, code)).await;
-                }));
+                if keyval == *gdk::keys::constants::Pause {
+                    unimplemented!()
+                }
+                if let Some(&xt) = KEYMAP_XORGEVDEV2XTKBD.get(keycode as usize) {
+                    log::debug!("xt: {:?}", xt);
+                    MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
+                        let self_ = Self::from_instance(&obj);
+                        let flags = if xt & 0x100 > 0 {
+                            KbdFlags::EXTENDED
+                        } else {
+                            KbdFlags::empty()
+                        };
+                        if event.contains(rdw::KeyEvent::PRESS) {
+                            let _ = self_.send_event(Event::Keyboard(flags | KbdFlags::DOWN, xt)).await;
+                        }
+                        if event.contains(rdw::KeyEvent::RELEASE) {
+                            let _ = self_.send_event(Event::Keyboard(flags | KbdFlags::RELEASE, xt)).await;
+                        }
+                    }));
+                }
             }));
 
             obj.connect_motion(clone!(@weak obj => move |_, x, y| {
@@ -170,7 +177,6 @@ mod imp {
             }));
 
             obj.connect_motion_relative(clone!(@weak obj => move |_, dx, dy| {
-                let self_ = Self::from_instance(&obj);
                 log::debug!("motion-relative: {:?}", (dx, dy));
             }));
 
@@ -233,7 +239,7 @@ mod imp {
                                 let imp = imp::Display::from_instance(&obj);
                                 match imp.state.take().unwrap() {
                                     RdpEvent::Authenticate { settings, tx } => {
-                                        tx.send(if res {
+                                        let _ = tx.send(if res {
                                             Ok(settings)
                                         } else {
                                             Err(RdpError::Failed("Authenticate cancelled".into()))
@@ -306,9 +312,6 @@ mod imp {
                                 if let Some(mut input) = ctxt.input() {
                                     input.send_extended_mouse_event(flags, x, y)?;
                                 }
-                            }
-                            e => {
-                                dbg!(e);
                             }
                         }
                         notifier.read_sync()?;
@@ -569,9 +572,8 @@ impl freerdp::client::Handler for RdpContextHandler {
             tx,
             settings: context.settings.clone(),
         })?;
-        if let settings = rx.recv().unwrap()? {
-            context.settings.clone_from(&settings);
-        }
+        let settings = rx.recv().unwrap()?;
+        context.settings.clone_from(&settings);
         Ok(())
     }
 
@@ -624,7 +626,7 @@ impl Notifier {
             0,
             EfdFlags::EFD_CLOEXEC | EfdFlags::EFD_NONBLOCK | EfdFlags::EFD_SEMAPHORE,
         )
-        .map_err(|e| RdpError::Failed(format!("eventfd failed: {}", e)))?;
+        .map_err(|e| RdpError::Failed(format!("eventfd() failed: {}", e)))?;
 
         Ok(Self {
             inner: Arc::new(NotifierInner { fd }),
@@ -640,7 +642,7 @@ impl Notifier {
         let buffer = 1u64.to_ne_bytes();
         st.write_all_async_future(buffer, glib::Priority::default())
             .await
-            .map_err(|e| RdpError::Failed(format!("notify() failed")))?;
+            .map_err(|_| RdpError::Failed("notify() failed".into()))?;
         Ok(())
     }
 
@@ -648,7 +650,7 @@ impl Notifier {
         let st = unsafe { gio::UnixInputStream::with_fd(self.inner.fd) };
         let buffer = 1u64.to_ne_bytes();
         st.read_all(buffer, NONE_CANCELLABLE)
-            .map_err(|e| RdpError::Failed(format!("read() failed")))?;
+            .map_err(|e| RdpError::Failed(format!("read() failed: {}", e)))?;
         Ok(())
     }
 }
