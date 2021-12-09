@@ -70,7 +70,7 @@ mod imp {
     #[derive(Debug)]
     pub struct Display {
         pub(crate) context: Arc<Mutex<freerdp::client::Context<RdpContextHandler>>>,
-        pub(crate) settings: RefCell<Option<freerdp::Settings>>,
+        state: RefCell<Option<RdpEvent>>,
         thread: OnceCell<JoinHandle<Result<()>>>,
         tx: OnceCell<Sender<Event>>,
         notifier: Notifier,
@@ -86,7 +86,7 @@ mod imp {
                 context: Arc::new(Mutex::new(freerdp::client::Context::new(
                     RdpContextHandler { tx },
                 ))),
-                settings: RefCell::new(None),
+                state: RefCell::new(None),
                 thread: OnceCell::new(),
                 tx: OnceCell::new(),
                 notifier: Notifier::new().unwrap(),
@@ -218,11 +218,25 @@ mod imp {
 
                 while let Some(e) = rx.next().await {
                     match e {
-                        RdpEvent::Authenticate { settings, tx } => {
-                            imp.settings.replace(Some(settings));
-                            obj.emit_by_name("rdp-authenticate", &[]).unwrap();
-                            let settings = imp.settings.take().unwrap();
-                            let _ = tx.send(Ok(settings));
+                        RdpEvent::Authenticate { .. } => {
+                            imp.state.replace(Some(e));
+                            glib::idle_add_local(glib::clone!(@weak obj => @default-return Continue(false), move || {
+                                let res = obj.emit_by_name("rdp-authenticate", &[]).unwrap().unwrap().get::<bool>().unwrap();
+                                let imp = imp::Display::from_instance(&obj);
+                                match imp.state.take().unwrap() {
+                                    RdpEvent::Authenticate { settings, tx } => {
+                                        tx.send(if res {
+                                            Ok(settings)
+                                        } else {
+                                            Err(RdpError::Failed("Authenticate cancelled".into()))
+                                        });
+                                    }
+                                    _ => {
+                                        panic!()
+                                    }
+                                }
+                                Continue(false)
+                            }));
                         }
                         RdpEvent::DesktopResize { w, h } => {
                             obj.set_display_size(Some((w as _, h as _)));
@@ -342,6 +356,16 @@ mod imp {
             }
             self.send_event(event).await
         }
+
+        pub fn with_settings(
+            &self,
+            f: impl FnOnce(&mut freerdp::Settings) -> Result<()>,
+        ) -> Result<()> {
+            match &mut *self.state.borrow_mut() {
+                Some(RdpEvent::Authenticate { settings, .. }) => f(settings),
+                _ => f(&mut self.context.lock().unwrap().settings),
+            }
+        }
     }
 }
 
@@ -359,13 +383,8 @@ impl Display {
         f: impl FnOnce(&mut freerdp::Settings) -> Result<()>,
     ) -> Result<()> {
         let self_ = imp::Display::from_instance(self);
-        if let Some(mut settings) = self_.settings.take() {
-            let res = f(&mut settings);
-            self_.settings.replace(Some(settings));
-            res
-        } else {
-            f(&mut self_.context.lock().unwrap().settings)
-        }
+
+        self_.with_settings(f)
     }
 
     pub fn rdp_connect(&mut self) -> Result<()> {
@@ -527,7 +546,7 @@ impl freerdp::client::Handler for RdpContextHandler {
             tx,
             settings: context.settings.clone(),
         })?;
-        if let Ok(settings) = rx.recv().unwrap() {
+        if let settings = rx.recv().unwrap()? {
             context.settings.clone_from(&settings);
         }
         Ok(())
@@ -545,7 +564,6 @@ impl freerdp::client::Handler for RdpContextHandler {
             _ => return Err(RdpError::Failed("No GDI dimensions".into())),
         };
 
-        dbg!(context.settings.gfx_h264());
         graphics.register_pointer::<RdpPointerHandler>();
         update.register::<RdpUpdateHandler>();
 
