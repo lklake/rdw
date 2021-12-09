@@ -33,7 +33,7 @@ pub struct RdwRdpDisplayClass {
 
 mod imp {
     use super::*;
-    use freerdp::input::{KbdFlags, PtrFlags, PtrXFlags};
+    use freerdp::input::{KbdFlags, PtrFlags, PtrXFlags, WHEEL_ROTATION_MASK};
     use glib::subclass::Signal;
     use gtk::subclass::prelude::*;
     use once_cell::sync::{Lazy, OnceCell};
@@ -175,7 +175,6 @@ mod imp {
             }));
 
             obj.connect_mouse_press(clone!(@weak obj => move |_, button| {
-                let self_ = Self::from_instance(&obj);
                 log::debug!("mouse-press: {:?}", button);
                 MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
                     let self_ = Self::from_instance(&obj);
@@ -184,17 +183,11 @@ mod imp {
             }));
 
             obj.connect_mouse_release(clone!(@weak obj => move |_, button| {
-                let self_ = Self::from_instance(&obj);
                 log::debug!("mouse-release: {:?}", button);
                 MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
                     let self_ = Self::from_instance(&obj);
                     let _ = self_.mouse_click(false, button).await;
                 }));
-            }));
-
-            obj.connect_scroll_discrete(clone!(@weak obj => move |_, scroll| {
-                let self_ = Self::from_instance(&obj);
-                log::debug!("scroll-discrete: {:?}", scroll);
             }));
 
             obj.connect_resize_request(clone!(@weak obj => move |_, width, height, wmm, hmm| {
@@ -203,7 +196,22 @@ mod imp {
         }
     }
 
-    impl WidgetImpl for Display {}
+    impl WidgetImpl for Display {
+        fn realize(&self, widget: &Self::Type) {
+            self.parent_realize(widget);
+
+            let ec = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
+            widget.add_controller(&ec);
+            ec.connect_scroll(clone!(@weak widget => @default-panic, move |_, dx, dy| {
+                MainContext::default().spawn_local(glib::clone!(@weak widget => async move {
+                    let self_ = Self::from_instance(&widget);
+                    let _ = self_.mouse_scroll(PtrFlags::HWHEEL, dx).await;
+                    let _ = self_.mouse_scroll(PtrFlags::WHEEL, dy).await;
+                }));
+                glib::signal::Inhibit(false)
+            }));
+        }
+    }
 
     impl rdw::DisplayImpl for Display {}
 
@@ -355,6 +363,21 @@ mod imp {
                 }
             }
             self.send_event(event).await
+        }
+
+        async fn mouse_scroll(&self, flags: PtrFlags, delta: f64) -> Result<()> {
+            // FIXME: loop for large values?
+            let windows_delta = f64::clamp(delta * -120.0, -256.0, 255.0) as i16;
+            self.send_event(Event::Mouse(
+                unsafe {
+                    PtrFlags::from_bits_unchecked(
+                        flags.bits() | (windows_delta as u16 & WHEEL_ROTATION_MASK),
+                    )
+                },
+                0,
+                0,
+            ))
+            .await
         }
 
         pub fn with_settings(
