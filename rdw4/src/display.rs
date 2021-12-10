@@ -65,6 +65,7 @@ pub mod imp {
 
         // The remote display size, ex: 1024x768
         pub(crate) display_size: Cell<Option<(usize, usize)>>,
+        pub(crate) last_resize_request: Cell<Option<(u32, u32, (u32, u32))>>,
         pub(crate) resize_timeout_id: Cell<Option<SourceId>>,
         // The currently defined cursor
         pub(crate) cursor: RefCell<Option<gdk::Cursor>>,
@@ -448,7 +449,10 @@ pub mod imp {
                                        let (geom, wmm, hmm) = (m.geometry(), m.width_mm() as u32, m.height_mm() as u32);
                                        (wmm * width / (geom.width as u32), hmm * height / geom.height as u32)
                                    }).unwrap_or((0u32, 0u32));
-                    widget.emit_by_name("resize-request", &[&width, &height, &mm.0, &mm.1]).unwrap();
+                    if Some((width, height, mm)) != self_.last_resize_request.get() {
+                        self_.last_resize_request.set(Some((width, height, mm)));
+                        widget.emit_by_name("resize-request", &[&width, &height, &mm.0, &mm.1]).unwrap();
+                    }
                     self_.resize_timeout_id.set(None);
                     glib::Continue(false)
                 }),

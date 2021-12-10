@@ -32,7 +32,10 @@ pub struct RdwRdpDisplayClass {
 
 mod imp {
     use super::*;
-    use freerdp::input::{KbdFlags, PtrFlags, PtrXFlags, WHEEL_ROTATION_MASK};
+    use freerdp::{
+        channels::disp::{MonitorFlags, MonitorLayout, Orientation},
+        input::{KbdFlags, PtrFlags, PtrXFlags, WHEEL_ROTATION_MASK},
+    };
     use glib::subclass::Signal;
     use gtk::subclass::prelude::*;
     use keycodemap::KEYMAP_XORGEVDEV2XTKBD;
@@ -49,6 +52,7 @@ mod imp {
         Keyboard(KbdFlags, u16),
         Mouse(PtrFlags, u16, u16),
         XMouse(PtrXFlags, u16, u16),
+        MonitorLayout(Vec<MonitorLayout>),
     }
 
     unsafe impl ClassStruct for RdwRdpDisplayClass {
@@ -81,17 +85,16 @@ mod imp {
     impl Default for Display {
         fn default() -> Self {
             let (tx, rx) = futures::channel::mpsc::channel(1);
-            let rx = RefCell::new(Some(rx));
+            let mut context = freerdp::client::Context::new(RdpContextHandler { tx });
+            context.settings.set_support_display_control(true);
             Self {
-                context: Arc::new(Mutex::new(freerdp::client::Context::new(
-                    RdpContextHandler { tx },
-                ))),
+                context: Arc::new(Mutex::new(context)),
                 state: RefCell::new(None),
                 thread: OnceCell::new(),
                 tx: OnceCell::new(),
                 notifier: Notifier::new().unwrap(),
                 last_mouse: Cell::new((0.0, 0.0)),
-                rx,
+                rx: RefCell::new(Some(rx)),
             }
         }
     }
@@ -198,6 +201,17 @@ mod imp {
 
             obj.connect_resize_request(clone!(@weak obj => move |_, width, height, wmm, hmm| {
                 log::debug!("resize-request: {:?}", (width, height, wmm, hmm));
+                MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
+                    let self_ = Self::from_instance(&obj);
+                    let _ = self_.send_event(Event::MonitorLayout(vec![MonitorLayout::new(
+                        MonitorFlags::PRIMARY,
+                        0, 0,
+                        width, height,
+                        wmm, hmm,
+                        Orientation::Landscape,
+                        0, 0
+                    )])).await;
+                }));
             }));
         }
     }
@@ -313,6 +327,11 @@ mod imp {
                                     input.send_extended_mouse_event(flags, x, y)?;
                                 }
                             }
+                            Event::MonitorLayout(layout) => {
+                                if let Some(disp) = ctxt.disp_mut() {
+                                    disp.send_monitor_layout(&layout)?;
+                                }
+                            }
                         }
                         notifier.read_sync()?;
                     }
@@ -346,8 +365,8 @@ mod imp {
             let (x, y) = (x as _, y as _);
             let mut event = match button {
                 gdk::BUTTON_PRIMARY => Event::Mouse(PtrFlags::BUTTON1, x, y),
-                gdk::BUTTON_MIDDLE => Event::Mouse(PtrFlags::BUTTON2, x, y),
-                gdk::BUTTON_SECONDARY => Event::Mouse(PtrFlags::BUTTON3, x, y),
+                gdk::BUTTON_MIDDLE => Event::Mouse(PtrFlags::BUTTON3, x, y),
+                gdk::BUTTON_SECONDARY => Event::Mouse(PtrFlags::BUTTON2, x, y),
                 8 | 97 => Event::XMouse(PtrXFlags::BUTTON1, x, y),
                 9 | 112 => Event::XMouse(PtrXFlags::BUTTON2, x, y),
                 _ => {
