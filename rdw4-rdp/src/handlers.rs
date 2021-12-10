@@ -1,7 +1,24 @@
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 
-use freerdp::{locale::keyboard_init_ex, update, RdpError, Result, PIXEL_FORMAT_BGRA32};
+use freerdp::{
+    client::Context, graphics::Pointer, locale::keyboard_init_ex, update, RdpError, Result,
+    PIXEL_FORMAT_BGRA32,
+};
 use futures::{executor::block_on, SinkExt};
+
+#[derive(Debug)]
+pub(crate) struct CursorInner {
+    pub(crate) data: Vec<u8>,
+    pub(crate) width: i32,
+    pub(crate) height: i32,
+    pub(crate) x: i32,
+    pub(crate) y: i32,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct Cursor {
+    pub(crate) inner: Arc<CursorInner>,
+}
 
 #[derive(Debug)]
 pub(crate) enum RdpEvent {
@@ -19,11 +36,15 @@ pub(crate) enum RdpEvent {
         w: u32,
         h: u32,
     },
+    CursorSet(Cursor),
+    CursorSetNull,
+    CursorSetDefault,
 }
 
 #[derive(Debug)]
 struct RdpPointerHandler {
-    _test: bool,
+    // FIXME: really need to replace new/free with Box...
+    cursor: Option<Cursor>,
 }
 
 impl freerdp::graphics::PointerHandler for RdpPointerHandler {
@@ -31,12 +52,49 @@ impl freerdp::graphics::PointerHandler for RdpPointerHandler {
 
     fn new(
         &mut self,
-        context: &mut freerdp::client::Context<Self::ContextHandler>,
-        pointer: &freerdp::graphics::Pointer,
+        context: &mut Context<Self::ContextHandler>,
+        pointer: &Pointer,
     ) -> Result<()> {
-        dbg!(pointer);
-        let _h = context.handler_mut();
+        let gdi = context.gdi().ok_or(RdpError::Unsupported)?;
+        let data = pointer.bgra_data(gdi.palette())?;
+        let width = pointer.width() as _;
+        let height = pointer.height() as _;
+        let x = pointer.x() as _;
+        let y = pointer.y() as _;
+        self.cursor = Some(Cursor {
+            inner: Arc::new(CursorInner {
+                data,
+                width,
+                height,
+                x,
+                y,
+            }),
+        });
         Ok(())
+    }
+
+    fn free(&mut self, _context: &mut Context<Self::ContextHandler>, _pointer: &Pointer) {
+        self.cursor.take();
+    }
+
+    fn set(
+        &mut self,
+        context: &mut Context<Self::ContextHandler>,
+        _pointer: &Pointer,
+    ) -> Result<()> {
+        let ctxt = context.handler_mut().ok_or(RdpError::Unsupported)?;
+        let cursor = self.cursor.as_ref().ok_or(RdpError::Unsupported)?;
+        ctxt.send(RdpEvent::CursorSet(cursor.clone()))
+    }
+
+    fn set_null(context: &mut Context<Self::ContextHandler>) -> Result<()> {
+        let ctxt = context.handler_mut().ok_or(RdpError::Unsupported)?;
+        ctxt.send(RdpEvent::CursorSetNull)
+    }
+
+    fn set_default(context: &mut Context<Self::ContextHandler>) -> Result<()> {
+        let ctxt = context.handler_mut().ok_or(RdpError::Unsupported)?;
+        ctxt.send(RdpEvent::CursorSetDefault)
     }
 }
 
@@ -135,9 +193,9 @@ impl freerdp::client::Handler for RdpContextHandler {
     fn post_connect(&mut self, context: &mut freerdp::client::Context<Self>) -> Result<()> {
         context.instance.gdi_init(PIXEL_FORMAT_BGRA32)?;
 
-        let gdi = context.gdi().unwrap();
-        let mut graphics = context.graphics().unwrap();
-        let mut update = context.update().unwrap();
+        let gdi = context.gdi().ok_or(RdpError::Unsupported)?;
+        let mut graphics = context.graphics().ok_or(RdpError::Unsupported)?;
+        let mut update = context.update().ok_or(RdpError::Unsupported)?;
 
         let (w, h) = match (gdi.width(), gdi.height()) {
             (Some(w), Some(h)) => (w, h),

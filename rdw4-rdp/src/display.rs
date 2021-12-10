@@ -250,6 +250,25 @@ mod imp {
                                 obj.update_area(x as _, y as _, w as _, h as _, stride as _, &buffer[start..end]);
                             }
                         },
+                        RdpEvent::CursorSet(cursor) => {
+                            let inner = cursor.inner;
+                            let cursor = rdw::Display::make_cursor(
+                                &inner.data,
+                                inner.width,
+                                inner.height,
+                                inner.x,
+                                inner.y,
+                                obj.scale_factor(),
+                            );
+                            obj.define_cursor(Some(cursor));
+                        },
+                        RdpEvent::CursorSetNull => {
+                            let cursor = gdk::Cursor::from_name("none", None);
+                            obj.define_cursor(cursor);
+                        },
+                        RdpEvent::CursorSetDefault => {
+                            obj.define_cursor(None);
+                        },
                     }
                 }
             }));
