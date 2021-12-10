@@ -42,6 +42,8 @@ async fn show_password_dialog(
         dialog = dialog.transient_for(&parent);
     }
     let dialog = dialog.build();
+    let ok = dialog.widget_for_response(gtk::ResponseType::Ok).unwrap();
+    dialog.set_default_widget(Some(&ok));
     let content = dialog.content_area();
     let grid = gtk::GridBuilder::new()
         .hexpand(true)
@@ -53,11 +55,13 @@ async fn show_password_dialog(
         .build();
     content.append(&grid);
     let username = gtk::Entry::new();
+    username.set_activates_default(true);
     if with_username {
         grid.attach(&gtk::Label::new(Some("Username")), 0, 0, 1, 1);
         grid.attach(&username, 1, 0, 1, 1);
     }
     let password = gtk::Entry::new();
+    password.set_activates_default(true);
     if with_password {
         grid.attach(&gtk::Label::new(Some("Password")), 0, 1, 1, 1);
         grid.attach(&password, 1, 1, 1, 1);
