@@ -70,8 +70,8 @@ pub mod imp {
             stream: &gio::OutputStream,
             io_priority: glib::Priority,
         ) -> Pin<Box<dyn Future<Output = Result<(), glib::Error>> + 'static>> {
-            let self_ = Self::from_instance(provider);
-            let future = self_.write_future.get().unwrap()(mime_type, stream, io_priority);
+            let imp = Self::from_instance(provider);
+            let future = imp.write_future.get().unwrap()(mime_type, stream, io_priority);
             future.unwrap_or_else(|| {
                 Box::pin(async move {
                     Err(glib::Error::new(
@@ -102,14 +102,14 @@ impl ContentProvider {
         write_future: F,
     ) -> Self {
         let inst = glib::Object::new::<Self>(&[]).unwrap();
-        let self_ = imp::ContentProvider::from_instance(&inst);
+        let imp = imp::ContentProvider::from_instance(&inst);
 
         let mut formats = gdk::ContentFormatsBuilder::new();
         for m in mime_types {
             formats = formats.add_mime_type(m);
         }
-        self_.formats.set(formats.build()).unwrap();
-        assert!(self_.write_future.set(Box::new(write_future)).is_ok());
+        imp.formats.set(formats.build()).unwrap();
+        assert!(imp.write_future.set(Box::new(write_future)).is_ok());
         inst
     }
 }

@@ -208,10 +208,10 @@ impl ObjectImpl for UsbRedir {
                 )
                 .class_handler(|_token, args| {
                     let inst = args[0].get::<super::UsbRedir>().unwrap();
-                    let self_ = UsbRedir::from_instance(&inst);
+                    let imp = UsbRedir::from_instance(&inst);
                     let msg: String = args[1].get().unwrap();
-                    self_.error_label.set_label(&msg);
-                    self_.infobar.set_revealed(true);
+                    imp.error_label.set_label(&msg);
+                    imp.infobar.set_revealed(true);
                     Some(true.to_value())
                 })
                 .accumulator(|_hint, ret, value| {
@@ -240,10 +240,10 @@ impl WidgetImpl for UsbRedir {
             let _id = rx.attach(
                 None,
                 clone!(@weak widget as this => @default-return glib::Continue(false), move |ev| {
-                    let self_ = Self::from_instance(&this);
+                    let imp = Self::from_instance(&this);
                     match ev {
-                        RdwUsbEvent::DeviceArrived(d) => self_.add_device(d),
-                        RdwUsbEvent::DeviceLeft(d) => self_.remove_device(d),
+                        RdwUsbEvent::DeviceArrived(d) => imp.add_device(d),
+                        RdwUsbEvent::DeviceLeft(d) => imp.remove_device(d),
                     }
                     glib::Continue(true)
                 }),

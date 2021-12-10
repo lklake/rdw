@@ -115,65 +115,65 @@ mod imp {
             obj.set_mouse_absolute(true);
 
             obj.connect_key_event(clone!(@weak obj => move |_, keyval, keycode, event| {
-                let self_ = Self::from_instance(&obj);
+                let imp = Self::from_instance(&obj);
                 log::debug!("key-press: {:?}", (keyval, keycode));
                 if event.contains(rdw::KeyEvent::PRESS) {
-                    self_.key_event(true, keyval, keycode);
+                    imp.key_event(true, keyval, keycode);
                 }
                 if event.contains(rdw::KeyEvent::RELEASE) {
-                    self_.key_event(false, keyval, keycode);
+                    imp.key_event(false, keyval, keycode);
                 }
             }));
 
             obj.connect_motion(clone!(@weak obj => move |_, x, y| {
-                let self_ = Self::from_instance(&obj);
+                let imp = Self::from_instance(&obj);
                 log::debug!("motion: {:?}", (x, y));
-                self_.last_motion.set(Some((x, y)));
+                imp.last_motion.set(Some((x, y)));
                 if !obj.mouse_absolute() {
                     return;
                 }
-                let button_mask = self_.last_button_mask();
-                if let Err(e) = self_.connection.pointer_event(button_mask, x as _, y as _) {
+                let button_mask = imp.last_button_mask();
+                if let Err(e) = imp.connection.pointer_event(button_mask, x as _, y as _) {
                     log::warn!("Failed to send pointer event: {}", e);
                 }
             }));
 
             obj.connect_motion_relative(clone!(@weak obj => move |_, dx, dy| {
-                let self_ = Self::from_instance(&obj);
+                let imp = Self::from_instance(&obj);
                 log::debug!("motion-relative: {:?}", (dx, dy));
                 if obj.mouse_absolute() {
                     return;
                 }
-                let button_mask = self_.last_button_mask();
+                let button_mask = imp.last_button_mask();
                 let (dx, dy) = (dx as i32 + 0x7fff, dy as i32 + 0x7fff);
-                if let Err(e) = self_.connection.pointer_event(button_mask, dx as _, dy as _) {
+                if let Err(e) = imp.connection.pointer_event(button_mask, dx as _, dy as _) {
                     log::warn!("Failed to send pointer event: {}", e);
                 }
             }));
 
             obj.connect_mouse_press(clone!(@weak obj => move |_, button| {
-                let self_ = Self::from_instance(&obj);
+                let imp = Self::from_instance(&obj);
                 log::debug!("mouse-press: {:?}", button);
-                self_.mouse_click(true, button);
+                imp.mouse_click(true, button);
             }));
 
             obj.connect_mouse_release(clone!(@weak obj => move |_, button| {
-                let self_ = Self::from_instance(&obj);
+                let imp = Self::from_instance(&obj);
                 log::debug!("mouse-release: {:?}", button);
-                self_.mouse_click(false, button);
+                imp.mouse_click(false, button);
             }));
 
             obj.connect_scroll_discrete(clone!(@weak obj => move |_, scroll| {
-                let self_ = Self::from_instance(&obj);
+                let imp = Self::from_instance(&obj);
                 log::debug!("scroll-discrete: {:?}", scroll);
-                self_.scroll(scroll);
+                imp.scroll(scroll);
             }));
 
             obj.connect_resize_request(clone!(@weak obj => move |_, width, height, wmm, hmm| {
-                let self_ = Self::from_instance(&obj);
+                let imp = Self::from_instance(&obj);
                 let sf = obj.scale_factor() as u32;
                 let (width, height) = (width / sf, height / sf);
-                let status = self_.connection.set_size(width, height);
+                let status = imp.connection.set_size(width, height);
                 log::debug!("resize-request: {:?} -> {:?}", (width, height, wmm, hmm), status);
             }));
 
@@ -207,8 +207,8 @@ mod imp {
 
             self.connection
                 .connect_vnc_initialized(clone!(@weak obj => move |conn| {
-                    let self_ = Self::from_instance(&obj);
-                    if let Err(e) = self_.on_initialized() {
+                    let imp = Self::from_instance(&obj);
+                    if let Err(e) = imp.on_initialized() {
                         log::warn!("Failed to initialize: {}", e);
                         conn.shutdown();
                     }
@@ -236,9 +236,9 @@ mod imp {
 
             self.connection.connect_vnc_framebuffer_update(
                 clone!(@weak obj => move |_, x, y, w, h| {
-                    let self_ = Self::from_instance(&obj);
+                    let imp = Self::from_instance(&obj);
                     log::debug!("framebuffer-update: {:?}", (x, y, w, h));
-                    if let Some(fb) = &*self_.fb.borrow() {
+                    if let Some(fb) = &*imp.fb.borrow() {
                         let sub = fb.get_sub(
                             x as _,
                             y as _,
@@ -247,7 +247,7 @@ mod imp {
                         );
                         obj.update_area(x, y, w, h, BaseFramebufferExt::width(fb) * 4, sub);
                     }
-                    if let Err(e) = self_.framebuffer_update_request(true) {
+                    if let Err(e) = imp.framebuffer_update_request(true) {
                         log::warn!("Failed to update framebuffer: {}", e);
                     }
                 }),
@@ -255,11 +255,11 @@ mod imp {
 
             self.connection
                 .connect_vnc_desktop_resize(clone!(@weak obj => move |_, w, h| {
-                    let self_ = Self::from_instance(&obj);
+                    let imp = Self::from_instance(&obj);
                     log::debug!("desktop-resize: {:?}", (w, h));
-                    self_.do_framebuffer_init();
+                    imp.do_framebuffer_init();
                     obj.set_display_size(Some((w as _, h as _)));
-                    if let Err(e) = self_.framebuffer_update_request(false) {
+                    if let Err(e) = imp.framebuffer_update_request(false) {
                         log::warn!("Failed to update framebuffer: {}", e);
                     }
                 }));
@@ -270,10 +270,10 @@ mod imp {
 
             self.connection.connect_vnc_pixel_format_changed(
                 clone!(@weak obj => move |_, format| {
-                    let self_ = Self::from_instance(&obj);
+                    let imp = Self::from_instance(&obj);
                     log::debug!("pixel-format-changed: {:?}", format);
-                    self_.do_framebuffer_init();
-                    if let Err(e) = self_.framebuffer_update_request(false) {
+                    imp.do_framebuffer_init();
+                    if let Err(e) = imp.framebuffer_update_request(false) {
                         log::warn!("Failed to update framebuffer: {}", e);
                     }
                 }),
@@ -439,9 +439,9 @@ impl Display {
     }
 
     pub fn connection(&self) -> &gvnc::Connection {
-        let self_ = imp::Display::from_instance(self);
+        let imp = imp::Display::from_instance(self);
 
-        &self_.connection
+        &imp.connection
     }
 }
 

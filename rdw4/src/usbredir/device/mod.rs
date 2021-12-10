@@ -22,18 +22,18 @@ impl Device {
     }
 
     pub fn device(&self) -> Option<rusb::Device<rusb::Context>> {
-        let self_ = imp::Device::from_instance(self);
-        self_.device()
+        let imp = imp::Device::from_instance(self);
+        imp.device()
     }
 
     pub fn set_device(&self, device: rusb::Device<rusb::Context>) {
-        let self_ = imp::Device::from_instance(self);
-        self_.set_device(device)
+        let imp = imp::Device::from_instance(self);
+        imp.set_device(device)
     }
 
     pub fn is_device(&self, device: &rusb::Device<rusb::Context>) -> bool {
-        let self_ = imp::Device::from_instance(self);
-        let d = self_.device.borrow();
+        let imp = imp::Device::from_instance(self);
+        let d = imp.device.borrow();
 
         if let Some(d) = &*d {
             d == device

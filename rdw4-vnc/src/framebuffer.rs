@@ -68,14 +68,14 @@ impl Framebuffer {
         .unwrap()
         .downcast()
         .unwrap();
-        let self_ = imp::Framebuffer::from_instance(&fb);
-        self_.buffer.set(buffer).unwrap();
+        let imp = imp::Framebuffer::from_instance(&fb);
+        imp.buffer.set(buffer).unwrap();
         fb
     }
 
     pub fn get_sub(&self, x: usize, y: usize, w: usize, h: usize) -> &[u8] {
-        let self_ = imp::Framebuffer::from_instance(self);
-        let buf = self_.buffer.get().unwrap();
+        let imp = imp::Framebuffer::from_instance(self);
+        let buf = imp.buffer.get().unwrap();
         let bw: usize = FramebufferExt::width(self) as _;
         let start = (x + y * bw) * 4;
         let end = (x + w + (y + h - 1) * bw) * 4;

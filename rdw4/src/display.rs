@@ -138,11 +138,11 @@ pub mod imp {
                 }),
             );
             gl_area.connect_realize(clone!(@weak obj => move |_| {
-                let self_ = Self::from_instance(&obj);
-                if let Err(e) = unsafe { self_.realize_gl() } {
+                let imp = Self::from_instance(&obj);
+                if let Err(e) = unsafe { imp.realize_gl() } {
                     log::warn!("Failed to realize gl: {}", e);
                     let e = glib::Error::new(Error::GL, &e);
-                    self_.gl_area().set_error(Some(&e));
+                    imp.gl_area().set_error(Some(&e));
                 }
             }));
 
@@ -327,33 +327,33 @@ pub mod imp {
             widget.add_controller(&ec);
             ec.connect_key_pressed(
                 clone!(@weak widget => @default-panic, move |ec, keyval, keycode, _state| {
-                    let self_ = Self::from_instance(&widget);
-                    self_.key_pressed(ec, keyval, keycode);
+                    let imp = Self::from_instance(&widget);
+                    imp.key_pressed(ec, keyval, keycode);
                     glib::signal::Inhibit(true)
                 }),
             );
             ec.connect_key_released(clone!(@weak widget => move |_, keyval, keycode, _state| {
-                let self_ = Self::from_instance(&widget);
-                self_.key_released(keyval, keycode);
+                let imp = Self::from_instance(&widget);
+                imp.key_released(keyval, keycode);
             }));
 
             let ec = gtk::EventControllerMotion::new();
             widget.add_controller(&ec);
             ec.connect_motion(clone!(@weak widget => move |_, x, y| {
-                let self_ = Self::from_instance(&widget);
-                if let Some((x, y)) = self_.transform_pos(x, y) {
+                let imp = Self::from_instance(&widget);
+                if let Some((x, y)) = imp.transform_pos(x, y) {
                     widget.emit_by_name("motion", &[&x, &y]).unwrap();
                 }
             }));
             ec.connect_enter(clone!(@weak widget => move |_, x, y| {
-                let self_ = Self::from_instance(&widget);
-                if let Some((x, y)) = self_.transform_pos(x, y) {
+                let imp = Self::from_instance(&widget);
+                if let Some((x, y)) = imp.transform_pos(x, y) {
                     widget.emit_by_name("motion", &[&x, &y]).unwrap();
                 }
             }));
             ec.connect_leave(clone!(@weak widget => move |_| {
-                let self_ = Self::from_instance(&widget);
-                self_.ungrab_keyboard();
+                let imp = Self::from_instance(&widget);
+                imp.ungrab_keyboard();
             }));
 
             let ec = gtk::GestureClick::new();
@@ -361,21 +361,21 @@ pub mod imp {
             widget.add_controller(&ec);
             ec.connect_pressed(
                 clone!(@weak widget => @default-panic, move |gesture, _n_press, x, y| {
-                    let self_ = Self::from_instance(&widget);
+                    let imp = Self::from_instance(&widget);
 
-                    self_.try_grab();
+                    imp.try_grab();
 
                     let button = gesture.current_button();
-                    if let Some((x, y)) = self_.transform_pos(x, y) {
+                    if let Some((x, y)) = imp.transform_pos(x, y) {
                         widget.emit_by_name("motion", &[&x, &y]).unwrap();
                     }
                     widget.emit_by_name("mouse-press", &[&button]).unwrap();
                 }),
             );
             ec.connect_released(clone!(@weak widget => move |gesture, _n_press, x, y| {
-                let self_ = Self::from_instance(&widget);
+                let imp = Self::from_instance(&widget);
                 let button = gesture.current_button();
-                if let Some((x, y)) = self_.transform_pos(x, y) {
+                if let Some((x, y)) = imp.transform_pos(x, y) {
                     widget.emit_by_name("motion", &[&x, &y]).unwrap();
                 }
                 widget.emit_by_name("mouse-release", &[&button]).unwrap();
@@ -438,22 +438,22 @@ pub mod imp {
             self.resize_timeout_id.set(Some(glib::timeout_add_local(
                 Duration::from_millis(500),
                 clone!(@weak widget => @default-return glib::Continue(false), move || {
-                    let self_ = Self::from_instance(&widget);
+                    let imp = Self::from_instance(&widget);
                     let sf = widget.scale_factor() as u32;
                     let width = width as u32 * sf;
                     let height = height as u32 * sf;
-                    let mm = self_.surface()
+                    let mm = imp.surface()
                                    .as_ref()
                                    .and_then(|s| gdk::traits::DisplayExt::monitor_at_surface(&widget.display(), s))
                                    .map(|m| {
                                        let (geom, wmm, hmm) = (m.geometry(), m.width_mm() as u32, m.height_mm() as u32);
                                        (wmm * width / (geom.width as u32), hmm * height / geom.height as u32)
                                    }).unwrap_or((0u32, 0u32));
-                    if Some((width, height, mm)) != self_.last_resize_request.get() {
-                        self_.last_resize_request.set(Some((width, height, mm)));
+                    if Some((width, height, mm)) != imp.last_resize_request.get() {
+                        imp.last_resize_request.set(Some((width, height, mm)));
                         widget.emit_by_name("resize-request", &[&width, &height, &mm.0, &mm.1]).unwrap();
                     }
-                    self_.resize_timeout_id.set(None);
+                    imp.resize_timeout_id.set(None);
                     glib::Continue(false)
                 }),
             )));
@@ -647,19 +647,19 @@ pub mod imp {
 
             //display.remove_controller(ec); here crashes badly
             glib::idle_add_local(clone!(@weak display => @default-panic, move || {
-                let self_ = Self::from_instance(&display);
-                match self_.grab_ec.upgrade() {
+                let imp = Self::from_instance(&display);
+                match imp.grab_ec.upgrade() {
                     Some(ec) => {
                         if let Some(widget) = ec.widget() {
                             widget.remove_controller(&ec);
                         }
-                        self_.grab_ec.set(None);
+                        imp.grab_ec.set(None);
                     },
                     _ => log::debug!("No grab event-controller?"),
                 };
-                if let Some(toplevel) = self_.toplevel() {
+                if let Some(toplevel) = imp.toplevel() {
                     toplevel.restore_system_shortcuts();
-                    self_.grabbed.set(self_.grabbed.get() - Grab::KEYBOARD);
+                    imp.grabbed.set(imp.grabbed.get() - Grab::KEYBOARD);
                     display.notify("grabbed");
                 }
                 glib::Continue(false)
@@ -723,8 +723,8 @@ pub mod imp {
                 .set(Some(glib::timeout_add_local(
                     Duration::from_millis(self.synthesize_delay.get() as _),
                     glib::clone!(@weak display => @default-return glib::Continue(false), move || {
-                        let self_ = Self::from_instance(&display);
-                        self_.emit_last_key_press();
+                        let imp = Self::from_instance(&display);
+                        imp.emit_last_key_press();
                         glib::Continue(false)
                     }),
                 )));
@@ -773,14 +773,14 @@ pub mod imp {
             let ec = gtk::EventControllerKey::new();
             ec.set_propagation_phase(gtk::PropagationPhase::Capture);
             ec.connect_key_pressed(clone!(@weak obj, @weak toplevel => @default-panic, move |ec, keyval, keycode, _state| {
-                let self_ = Self::from_instance(&obj);
-                self_.key_pressed(ec, keyval, keycode);
+                let imp = Self::from_instance(&obj);
+                imp.key_pressed(ec, keyval, keycode);
                 glib::signal::Inhibit(true)
             }));
             ec.connect_key_released(
                 clone!(@weak obj => @default-panic, move |_ec, keyval, keycode, _state| {
-                    let self_ = Self::from_instance(&obj);
-                    self_.key_released(keyval, keycode);
+                    let imp = Self::from_instance(&obj);
+                    imp.key_released(keyval, keycode);
                 }),
             );
             if let Some(root) = obj.root() {
@@ -793,10 +793,10 @@ pub mod imp {
                     let inhibited = toplevel.is_shortcuts_inhibited();
                     log::debug!("shortcuts-inhibited: {}", inhibited);
                     if !inhibited {
-                        let self_ = Self::from_instance(&obj);
-                        let id = self_.shortcuts_inhibited_id.take();
+                        let imp = Self::from_instance(&obj);
+                        let id = imp.shortcuts_inhibited_id.take();
                         toplevel.disconnect(id.unwrap());
-                        self_.ungrab_keyboard();
+                        imp.ungrab_keyboard();
                     }
                 }),
             );
@@ -1117,9 +1117,9 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         }
         #[cfg(not(feature = "bindings"))]
         {
-            let self_ = imp::Display::from_instance(self_);
+            let imp = imp::Display::from_instance(self_);
 
-            self_.display_size.get()
+            imp.display_size.get()
         }
     }
 
@@ -1138,16 +1138,16 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         }
         #[cfg(not(feature = "bindings"))]
         {
-            let self_ = imp::Display::from_instance(self_);
+            let imp = imp::Display::from_instance(self_);
 
             if self.display_size() == size {
                 return;
             }
 
-            let _ctx = self_.make_current();
+            let _ctx = imp.make_current();
             if let Some((width, height)) = size {
                 unsafe {
-                    gl::BindTexture(gl::TEXTURE_2D, self_.texture_id());
+                    gl::BindTexture(gl::TEXTURE_2D, imp.texture_id());
                     gl::TexImage2D(
                         gl::TEXTURE_2D,
                         0,
@@ -1162,7 +1162,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
                 }
             }
 
-            self_.display_size.replace(size);
+            imp.display_size.replace(size);
             self.queue_resize();
         }
     }
@@ -1177,11 +1177,11 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         }
         #[cfg(not(feature = "bindings"))]
         {
-            let self_ = imp::Display::from_instance(self_);
+            let imp = imp::Display::from_instance(self_);
             if self.mouse_absolute() {
-                self_.gl_area().set_cursor(cursor.as_ref());
+                imp.gl_area().set_cursor(cursor.as_ref());
             }
-            self_.cursor.replace(cursor);
+            imp.cursor.replace(cursor);
         }
     }
 
@@ -1207,9 +1207,9 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         }
         #[cfg(not(feature = "bindings"))]
         {
-            let self_ = imp::Display::from_instance(self_);
+            let imp = imp::Display::from_instance(self_);
 
-            self_.cursor_position.set(pos);
+            imp.cursor_position.set(pos);
             self.queue_draw();
         }
     }
@@ -1232,12 +1232,12 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         }
         #[cfg(not(feature = "bindings"))]
         {
-            let self_ = imp::Display::from_instance(self_);
-            let _ctx = self_.make_current();
+            let imp = imp::Display::from_instance(self_);
+            let _ctx = imp.make_current();
 
             // TODO: check data boundaries
             unsafe {
-                gl::BindTexture(gl::TEXTURE_2D, self_.texture_id());
+                gl::BindTexture(gl::TEXTURE_2D, imp.texture_id());
                 gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as _);
                 gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as _);
                 gl::PixelStorei(gl::UNPACK_ROW_LENGTH, stride / 4);
@@ -1254,8 +1254,8 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
                 );
             }
 
-            self_.dmabuf.replace(None);
-            self_.gl_area().queue_render();
+            imp.dmabuf.replace(None);
+            imp.gl_area().queue_render();
         }
     }
 
@@ -1269,8 +1269,8 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         }
         #[cfg(not(feature = "bindings"))]
         {
-            let self_ = imp::Display::from_instance(self_);
-            let _ctx = self_.make_current();
+            let imp = imp::Display::from_instance(self_);
+            let _ctx = imp.make_current();
 
             let egl = egl::egl();
             let egl_image_target = match egl::image_target_texture_2d_oes() {
@@ -1281,7 +1281,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
                 }
             };
 
-            let egl_dpy = match self_.egl_display() {
+            let egl_dpy = match imp.egl_display() {
                 Some(dpy) => dpy,
                 None => {
                     log::warn!("Unsupported display kind (or not egl)");
@@ -1324,13 +1324,13 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
             };
 
             unsafe {
-                gl::BindTexture(gl::TEXTURE_2D, self_.texture_id());
+                gl::BindTexture(gl::TEXTURE_2D, imp.texture_id());
                 gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as _);
                 gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as _);
                 egl_image_target(gl::TEXTURE_2D, img.as_ptr() as gl::types::GLeglImageOES);
             }
 
-            self_.dmabuf.replace(Some(s));
+            imp.dmabuf.replace(Some(s));
 
             if let Err(e) = egl.destroy_image(egl_dpy, img) {
                 log::warn!("eglDestroyImage() failed: {}", e);
@@ -1348,22 +1348,22 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         }
         #[cfg(not(feature = "bindings"))]
         {
-            let self_ = imp::Display::from_instance(self_);
-            let _ctx = self_.make_current();
+            let imp = imp::Display::from_instance(self_);
+            let _ctx = imp.make_current();
 
             unsafe {
                 gl::ClearColor(0.1, 0.1, 0.1, 1.0);
                 gl::Clear(gl::COLOR_BUFFER_BIT);
                 gl::Disable(gl::BLEND);
 
-                if let Some(vp) = self_.viewport() {
+                if let Some(vp) = imp.viewport() {
                     gl::Viewport(vp.x, vp.y, vp.width, vp.height);
-                    let flip = self_.dmabuf.borrow().as_ref().map_or(false, |d| d.y0_top);
-                    self_.texture_blit(flip);
+                    let flip = imp.dmabuf.borrow().as_ref().map_or(false, |d| d.y0_top);
+                    imp.texture_blit(flip);
                 }
             }
 
-            self_.gl_area().queue_draw();
+            imp.gl_area().queue_draw();
         }
     }
 

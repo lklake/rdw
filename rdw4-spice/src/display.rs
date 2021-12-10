@@ -114,11 +114,11 @@ mod imp {
             obj.set_mouse_absolute(true);
 
             obj.connect_key_event(clone!(@weak obj => move |_, keyval, keycode, event| {
-                let self_ = Self::from_instance(&obj);
+                let imp = Self::from_instance(&obj);
                 log::debug!("key-event: {:?}", (event, keyval, keycode));
                 // TODO: get the correct keymap according to gdk display type
                 if let Some(&xt) = KEYMAP_XORGEVDEV2XTKBD.get(keycode as usize) {
-                    if let Some(input) = self_.input.upgrade() {
+                    if let Some(input) = imp.input.upgrade() {
                         if event.contains(rdw::KeyEvent::PRESS|rdw::KeyEvent::RELEASE) {
                             input.key_press_and_release(xt as _)
                         } else if event.contains(rdw::KeyEvent::PRESS) {
@@ -131,46 +131,46 @@ mod imp {
             }));
 
             obj.connect_motion(clone!(@weak obj => move |_, x, y| {
-                let self_ = Self::from_instance(&obj);
+                let imp = Self::from_instance(&obj);
                 log::debug!("motion: {:?}", (x, y));
-                if let Some(input) = self_.input.upgrade() {
-                    input.position(x as _, y as _, self_.nth_monitor as _, self_.last_button_state());
+                if let Some(input) = imp.input.upgrade() {
+                    input.position(x as _, y as _, imp.nth_monitor as _, imp.last_button_state());
                 }
             }));
 
             obj.connect_motion_relative(clone!(@weak obj => move |_, dx, dy| {
-                let self_ = Self::from_instance(&obj);
+                let imp = Self::from_instance(&obj);
                 log::debug!("motion-relative: {:?}", (dx, dy));
-                if let Some(input) = self_.input.upgrade() {
-                    input.motion(dx as _, dy as _, self_.last_button_state());
+                if let Some(input) = imp.input.upgrade() {
+                    input.motion(dx as _, dy as _, imp.last_button_state());
                 }
             }));
 
             obj.connect_mouse_press(clone!(@weak obj => move |_, button| {
-                let self_ = Self::from_instance(&obj);
+                let imp = Self::from_instance(&obj);
                 log::debug!("mouse-press: {:?}", button);
-                self_.mouse_click(true, button);
+                imp.mouse_click(true, button);
             }));
 
             obj.connect_mouse_release(clone!(@weak obj => move |_, button| {
-                let self_ = Self::from_instance(&obj);
+                let imp = Self::from_instance(&obj);
                 log::debug!("mouse-release: {:?}", button);
-                self_.mouse_click(false, button);
+                imp.mouse_click(false, button);
             }));
 
             obj.connect_scroll_discrete(clone!(@weak obj => move |_, scroll| {
-                let self_ = Self::from_instance(&obj);
+                let imp = Self::from_instance(&obj);
                 log::debug!("scroll-discrete: {:?}", scroll);
-                self_.scroll(scroll);
+                imp.scroll(scroll);
             }));
 
             obj.connect_resize_request(clone!(@weak obj => move |_, width, height, wmm, hmm| {
-                let self_ = Self::from_instance(&obj);
+                let imp = Self::from_instance(&obj);
                 log::debug!("resize-request: {:?}", (width, height));
-                if let Some(main) = self_.main.upgrade() {
-                    main.update_display_enabled(self_.nth_monitor as _, true, false);
-                    main.update_display_mm(self_.nth_monitor as _, wmm as _, hmm as _, false);
-                    main.update_display(self_.nth_monitor as _, 0, 0, width as _, height as _, true);
+                if let Some(main) = imp.main.upgrade() {
+                    main.update_display_enabled(imp.nth_monitor as _, true, false);
+                    main.update_display_mm(imp.nth_monitor as _, wmm as _, hmm as _, false);
+                    main.update_display(imp.nth_monitor as _, 0, 0, width as _, height as _, true);
                 }
             }));
 
@@ -178,7 +178,7 @@ mod imp {
 
             session.connect_channel_new(clone!(@weak obj => move |_session, channel| {
                 use spice::ChannelType::*;
-                let self_ = Self::from_instance(&obj);
+                let imp = Self::from_instance(&obj);
 
                 let type_ = match spice::ChannelType::try_from(channel.channel_type()) {
                     Ok(t) => t,
@@ -188,14 +188,14 @@ mod imp {
                 match type_ {
                     Main => {
                         let main = channel.clone().downcast::<spice::MainChannel>().unwrap();
-                        self_.main.set(Some(&main));
+                        imp.main.set(Some(&main));
 
                         main.connect_channel_event(clone!(@weak obj => move |_, event| {
                             use spice::ChannelEvent::*;
 
-                            let self_ = Self::from_instance(&obj);
+                            let imp = Self::from_instance(&obj);
                             if event == Closed {
-                                self_.session.disconnect();
+                                imp.session.disconnect();
                             }
                         }));
 
@@ -206,9 +206,9 @@ mod imp {
                         }));
 
                         main.connect_main_clipboard_selection(clone!(@weak obj => move |_main, selection, type_, data| {
-                            let self_ = Self::from_instance(&obj);
+                            let imp = Self::from_instance(&obj);
                             log::debug!("clipboard-data: {:?}", (selection, type_, data.len()));
-                            if let Some((req_type, mut tx)) = self_.clipboard[selection as usize].tx.take() {
+                            if let Some((req_type, mut tx)) = imp.clipboard[selection as usize].tx.take() {
                                 if type_ != req_type as u32 {
                                     log::warn!("Didn't get expected type from guest clipboard!");
                                     return;
@@ -220,13 +220,13 @@ mod imp {
                         }));
 
                         main.connect_main_clipboard_selection_grab(clone!(@weak obj => move |_main, selection, types| {
-                            let self_ = Self::from_instance(&obj);
+                            let imp = Self::from_instance(&obj);
                             let types: Vec<_> = types.iter()
                                                      .filter_map(|&t| spice::ClipboardFormat::try_from(t as i32).ok())
                                                      .filter_map(util::mime_from_format)
                                                      .collect();
                             log::debug!("clipboard-grab: {:?}", (selection, &types));
-                            if let Some(clipboard) = self_.clipboard_from_selection(selection) {
+                            if let Some(clipboard) = imp.clipboard_from_selection(selection) {
                                 let content = rdw::ContentProvider::new(&types, clone!(@weak obj => @default-return None, move |mime, stream, prio| {
                                     log::debug!("content-provider-write: {:?}", (mime, stream));
                                     let format = match util::format_from_mime(mime) {
@@ -237,14 +237,14 @@ mod imp {
                                     Some(Box::pin(clone!(@weak obj, @strong stream => @default-return panic!(), async move {
                                         use futures::stream::StreamExt;
 
-                                        let self_ = Self::from_instance(&obj);
-                                        if self_.clipboard[selection as usize].tx.borrow().is_some() {
+                                        let imp = Self::from_instance(&obj);
+                                        if imp.clipboard[selection as usize].tx.borrow().is_some() {
                                             return Err(glib::Error::new(gio::IOErrorEnum::Failed, "clipboard request pending"));
                                         }
 
-                                        if let Some(main) = self_.main.upgrade() {
+                                        if let Some(main) = imp.main.upgrade() {
                                             let (tx, mut rx) = futures::channel::mpsc::channel(1);
-                                            self_.clipboard[selection as usize].tx.replace(Some((format, tx)));
+                                            imp.clipboard[selection as usize].tx.replace(Some((format, tx)));
                                             main.clipboard_selection_request(selection, format as u32);
                                             if let Some(bytes) = rx.next().await {
                                                 return stream.write_bytes_async_future(&bytes, prio).await.map(|_| ());
@@ -261,9 +261,9 @@ mod imp {
                         }));
 
                         main.connect_main_clipboard_selection_release(clone!(@weak obj => move |_main, selection| {
-                            let self_ = Self::from_instance(&obj);
+                            let imp = Self::from_instance(&obj);
                             log::debug!("clipboard-release: {:?}", selection);
-                            if let Some(clipboard) = self_.clipboard_from_selection(selection) {
+                            if let Some(clipboard) = imp.clipboard_from_selection(selection) {
                                 if let Err(e) = clipboard.set_content(gdk::NONE_CONTENT_PROVIDER) {
                                     log::warn!("Failed to release clipboard: {}", e);
                                 }
@@ -271,11 +271,11 @@ mod imp {
                         }));
 
                         main.connect_main_clipboard_selection_request(clone!(@weak obj => @default-return false, move |main, selection, type_| {
-                            let self_ = Self::from_instance(&obj);
+                            let imp = Self::from_instance(&obj);
                             let mime = spice::ClipboardFormat::try_from(type_ as i32).map_or(None, util::mime_from_format);
                             log::debug!("clipboard-request: {:?}", (selection, mime));
 
-                            if let (Some(mime), Some(clipboard)) = (mime, self_.clipboard_from_selection(selection)) {
+                            if let (Some(mime), Some(clipboard)) = (mime, imp.clipboard_from_selection(selection)) {
                                 glib::MainContext::default().spawn_local(glib::clone!(@weak obj, @weak clipboard, @strong main => async move {
                                     let res = clipboard.read_async_future(&[mime], glib::Priority::default()).await;
                                     log::debug!("clipboard-read: {:?}", res);
@@ -308,7 +308,7 @@ mod imp {
                     },
                     Inputs => {
                         let input = channel.clone().downcast::<spice::InputsChannel>().unwrap();
-                        self_.input.set(Some(&input));
+                        imp.input.set(Some(&input));
 
                         input.connect_inputs_modifiers(clone!(@weak obj => move |input| {
                             let modifiers = input.key_modifiers();
@@ -323,7 +323,7 @@ mod imp {
                     }
                     Display => {
                         let dpy = channel.clone().downcast::<spice::DisplayChannel>().unwrap();
-                        self_.display.set(Some(&dpy));
+                        imp.display.set(Some(&dpy));
 
                         dpy.connect_display_primary_create(clone!(@weak obj => move |_| {
                             log::debug!("primary-create");
@@ -334,15 +334,15 @@ mod imp {
                         });
 
                         dpy.connect_display_mark(clone!(@weak obj => move |_, mark| {
-                            let self_ = Self::from_instance(&obj);
+                            let imp = Self::from_instance(&obj);
                             log::debug!("primary-mark: {}", mark);
-                            self_.invalidate_monitor();
+                            imp.invalidate_monitor();
                         }));
 
                         dpy.connect_display_invalidate(clone!(@weak obj => move |_, x, y, w, h| {
-                            let self_ = Self::from_instance(&obj);
+                            let imp = Self::from_instance(&obj);
                             log::debug!("primary-invalidate: {:?}", (x, y, w, h));
-                            self_.invalidate(x as _, y as _, w as _, h as _);
+                            imp.invalidate(x as _, y as _, w as _, h as _);
                         }));
 
                         dpy.connect_gl_scanout_notify(clone!(@weak obj => move |dpy| {
@@ -369,15 +369,15 @@ mod imp {
                         }));
 
                         dpy.connect_monitors_notify(clone!(@weak obj => move |dpy| {
-                            let self_ = Self::from_instance(&obj);
+                            let imp = Self::from_instance(&obj);
                             let monitors = dpy.monitors();
                             log::debug!("notify::monitors: {:?}", monitors);
 
-                            let monitor_config = monitors.and_then(|m| m.get(self_.nth_monitor).copied());
+                            let monitor_config = monitors.and_then(|m| m.get(imp.nth_monitor).copied());
                             if let Some((0, 0, w, h)) = monitor_config.map(|c| c.geometry()) {
                                 obj.set_display_size(Some((w, h)));
                             }
-                            self_.monitor_config.set(monitor_config);
+                            imp.monitor_config.set(monitor_config);
                         }));
 
                         ChannelExt::connect(&dpy);
@@ -458,9 +458,9 @@ mod imp {
 
             let clipboard = self.clipboard_from_selection(selection).unwrap();
             let watch_id = clipboard.connect_changed(clone!(@weak obj => move |clipboard| {
-                let self_ = Self::from_instance(&obj);
+                let imp = Self::from_instance(&obj);
                 let is_local = clipboard.is_local();
-                if let (false, Some(main), Some(formats)) = (is_local, self_.main.upgrade(), clipboard.formats()) {
+                if let (false, Some(main), Some(formats)) = (is_local, imp.main.upgrade(), clipboard.formats()) {
                     let mut types = formats.mime_types()
                                            .iter()
                                            .filter_map(|m| util::format_from_mime(m))
@@ -624,9 +624,9 @@ impl Display {
     }
 
     pub fn session(&self) -> &spice::Session {
-        let self_ = imp::Display::from_instance(self);
+        let imp = imp::Display::from_instance(self);
 
-        &self_.session
+        &imp.session
     }
 }
 

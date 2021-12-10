@@ -24,13 +24,13 @@ impl UsbRedir {
     }
 
     pub fn model(&self) -> &gio::ListStore {
-        let self_ = imp::UsbRedir::from_instance(self);
-        &self_.model
+        let imp = imp::UsbRedir::from_instance(self);
+        &imp.model
     }
 
     pub fn find_item<F: Fn(&Device) -> bool>(&self, test: F) -> Option<u32> {
-        let self_ = imp::UsbRedir::from_instance(self);
-        self_.find_item(test)
+        let imp = imp::UsbRedir::from_instance(self);
+        imp.find_item(test)
     }
 
     pub fn connect_device_state_set<F: Fn(&Self, &Device, bool) + 'static>(

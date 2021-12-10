@@ -90,8 +90,8 @@ impl ObjectImpl for Row {
 
         self.switch.connect_state_set(
             clone!(@weak obj as this => @default-panic, move |s, state| {
-                let self_ = Self::from_instance(&this);
-                if let Some(device) = &*self_.device.borrow() {
+                let imp = Self::from_instance(&this);
+                if let Some(device) = &*imp.device.borrow() {
                     device.emit_by_name("state-set", &[&state]).unwrap();
                 } else {
                     s.set_state(false);

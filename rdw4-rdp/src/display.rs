@@ -124,17 +124,17 @@ mod imp {
                 if let Some(&xt) = KEYMAP_XORGEVDEV2XTKBD.get(keycode as usize) {
                     log::debug!("xt: {:?}", xt);
                     MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
-                        let self_ = Self::from_instance(&obj);
+                        let imp = Self::from_instance(&obj);
                         let flags = if xt & 0x100 > 0 {
                             KbdFlags::EXTENDED
                         } else {
                             KbdFlags::empty()
                         };
                         if event.contains(rdw::KeyEvent::PRESS) {
-                            let _ = self_.send_event(Event::Keyboard(flags | KbdFlags::DOWN, xt)).await;
+                            let _ = imp.send_event(Event::Keyboard(flags | KbdFlags::DOWN, xt)).await;
                         }
                         if event.contains(rdw::KeyEvent::RELEASE) {
-                            let _ = self_.send_event(Event::Keyboard(flags | KbdFlags::RELEASE, xt)).await;
+                            let _ = imp.send_event(Event::Keyboard(flags | KbdFlags::RELEASE, xt)).await;
                         }
                     }));
                 }
@@ -143,9 +143,9 @@ mod imp {
             obj.connect_motion(clone!(@weak obj => move |_, x, y| {
                 log::debug!("motion: {:?}", (x, y));
                 MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
-                    let self_ = Self::from_instance(&obj);
-                    self_.last_mouse.set((x, y));
-                    let _ = self_.send_event(Event::Mouse(PtrFlags::MOVE, x as _, y as _)).await;
+                    let imp = Self::from_instance(&obj);
+                    imp.last_mouse.set((x, y));
+                    let _ = imp.send_event(Event::Mouse(PtrFlags::MOVE, x as _, y as _)).await;
                 }));
             }));
 
@@ -156,24 +156,24 @@ mod imp {
             obj.connect_mouse_press(clone!(@weak obj => move |_, button| {
                 log::debug!("mouse-press: {:?}", button);
                 MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
-                    let self_ = Self::from_instance(&obj);
-                    let _ = self_.mouse_click(true, button).await;
+                    let imp = Self::from_instance(&obj);
+                    let _ = imp.mouse_click(true, button).await;
                 }));
             }));
 
             obj.connect_mouse_release(clone!(@weak obj => move |_, button| {
                 log::debug!("mouse-release: {:?}", button);
                 MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
-                    let self_ = Self::from_instance(&obj);
-                    let _ = self_.mouse_click(false, button).await;
+                    let imp = Self::from_instance(&obj);
+                    let _ = imp.mouse_click(false, button).await;
                 }));
             }));
 
             obj.connect_resize_request(clone!(@weak obj => move |_, width, height, wmm, hmm| {
                 log::debug!("resize-request: {:?}", (width, height, wmm, hmm));
                 MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
-                    let self_ = Self::from_instance(&obj);
-                    let _ = self_.send_event(Event::MonitorLayout(vec![MonitorLayout::new(
+                    let imp = Self::from_instance(&obj);
+                    let _ = imp.send_event(Event::MonitorLayout(vec![MonitorLayout::new(
                         MonitorFlags::PRIMARY,
                         0, 0,
                         width, height,
@@ -194,9 +194,9 @@ mod imp {
             widget.add_controller(&ec);
             ec.connect_scroll(clone!(@weak widget => @default-panic, move |_, dx, dy| {
                 MainContext::default().spawn_local(glib::clone!(@weak widget => async move {
-                    let self_ = Self::from_instance(&widget);
-                    let _ = self_.mouse_scroll(PtrFlags::HWHEEL, dx).await;
-                    let _ = self_.mouse_scroll(PtrFlags::WHEEL, dy).await;
+                    let imp = Self::from_instance(&widget);
+                    let _ = imp.mouse_scroll(PtrFlags::HWHEEL, dx).await;
+                    let _ = imp.mouse_scroll(PtrFlags::WHEEL, dy).await;
                 }));
                 glib::signal::Inhibit(false)
             }));
@@ -397,15 +397,15 @@ impl Display {
         &self,
         f: impl FnOnce(&mut freerdp::Settings) -> Result<()>,
     ) -> Result<()> {
-        let self_ = imp::Display::from_instance(self);
+        let imp = imp::Display::from_instance(self);
 
-        self_.with_settings(f)
+        imp.with_settings(f)
     }
 
     pub fn rdp_connect(&mut self) -> Result<()> {
-        let self_ = imp::Display::from_instance(self);
+        let imp = imp::Display::from_instance(self);
 
-        self_.connect(self)
+        imp.connect(self)
     }
 
     pub fn connect_rdp_authenticate<F: Fn(&Self) -> bool + 'static>(
