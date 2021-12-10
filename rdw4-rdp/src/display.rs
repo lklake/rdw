@@ -1,24 +1,18 @@
-use std::{
-    convert::TryFrom,
-    os::unix::prelude::RawFd,
-    sync::{mpsc, Arc},
-    thread,
-    time::Duration,
-};
+use std::{convert::TryFrom, sync::mpsc, thread, time::Duration};
 
 use freerdp::{
     locale::keyboard_init_ex,
     update,
-    winpr::{wait_for_multiple_objects, FdMode, Handle, WaitResult},
+    winpr::{wait_for_multiple_objects, WaitResult},
     RdpError, Result, PIXEL_FORMAT_BGRA32,
 };
 use futures::{executor::block_on, stream::StreamExt, SinkExt};
 use glib::{clone, subclass::prelude::*, translate::*, SignalHandlerId};
-use gtk::{gio, glib, prelude::*};
-use rdw::gtk::{self, gio::NONE_CANCELLABLE};
+use gtk::{glib, prelude::*};
 
-// use keycodemap::KEYMAP_XORGEVDEV2QNUM;
-use rdw::DisplayExt;
+use rdw::{gtk, DisplayExt};
+
+use crate::notifier::Notifier;
 
 #[repr(C)]
 pub struct RdwRdpDisplay {
@@ -618,58 +612,5 @@ impl freerdp::client::Handler for RdpContextHandler {
 
         let handler = context.handler_mut().unwrap();
         handler.desktop_resize(w, h)
-    }
-}
-
-#[derive(Debug)]
-struct NotifierInner {
-    fd: RawFd,
-}
-
-impl Drop for NotifierInner {
-    fn drop(&mut self) {
-        let _ = nix::unistd::close(self.fd);
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct Notifier {
-    inner: Arc<NotifierInner>,
-}
-
-impl Notifier {
-    fn new() -> Result<Self> {
-        // TODO: non-Linux
-        use nix::sys::eventfd::*;
-        let fd = eventfd(
-            0,
-            EfdFlags::EFD_CLOEXEC | EfdFlags::EFD_NONBLOCK | EfdFlags::EFD_SEMAPHORE,
-        )
-        .map_err(|e| RdpError::Failed(format!("eventfd() failed: {}", e)))?;
-
-        Ok(Self {
-            inner: Arc::new(NotifierInner { fd }),
-        })
-    }
-
-    fn handle(&self) -> Handle {
-        Handle::new_fd_event(&[], false, false, self.inner.fd, FdMode::READ)
-    }
-
-    async fn notify(&self) -> Result<()> {
-        let st = unsafe { gio::UnixOutputStream::with_fd(self.inner.fd) };
-        let buffer = 1u64.to_ne_bytes();
-        st.write_all_async_future(buffer, glib::Priority::default())
-            .await
-            .map_err(|_| RdpError::Failed("notify() failed".into()))?;
-        Ok(())
-    }
-
-    fn read_sync(&self) -> Result<()> {
-        let st = unsafe { gio::UnixInputStream::with_fd(self.inner.fd) };
-        let buffer = 1u64.to_ne_bytes();
-        st.read_all(buffer, NONE_CANCELLABLE)
-            .map_err(|e| RdpError::Failed(format!("read() failed: {}", e)))?;
-        Ok(())
     }
 }
