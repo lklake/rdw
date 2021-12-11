@@ -1,8 +1,11 @@
 use std::sync::{mpsc, Arc};
 
 use freerdp::{
-    client::Context, graphics::Pointer, locale::keyboard_init_ex, update, RdpError, Result,
-    PIXEL_FORMAT_BGRA32,
+    channels::cliprdr::GeneralCapabilities,
+    client::{CliprdrClientContext, CliprdrHandler, Context},
+    graphics::Pointer,
+    locale::keyboard_init_ex,
+    update, RdpError, Result, PIXEL_FORMAT_BGRA32,
 };
 use futures::{executor::block_on, SinkExt};
 
@@ -150,6 +153,59 @@ impl freerdp::update::UpdateHandler for RdpUpdateHandler {
 }
 
 #[derive(Debug)]
+pub(crate) struct RdpClipHandler;
+
+impl CliprdrHandler for RdpClipHandler {
+    fn monitor_ready(&mut self, context: &mut CliprdrClientContext) -> Result<()> {
+        let capabilities = GeneralCapabilities::USE_LONG_FORMAT_NAMES
+            | GeneralCapabilities::STREAM_FILECLIP_ENABLED
+            | GeneralCapabilities::FILECLIP_NO_FILE_PATHS
+            | GeneralCapabilities::HUGE_FILE_SUPPORT_ENABLED;
+        context.send_client_general_capabilities(&capabilities)?;
+        context.send_client_format_list(&[])
+    }
+
+    fn server_capabilities(
+        &mut self,
+        _context: &mut CliprdrClientContext,
+        capabilities: Option<&freerdp::channels::cliprdr::GeneralCapabilities>,
+    ) -> Result<()> {
+        dbg!(capabilities);
+        Ok(())
+    }
+
+    fn server_format_list(
+        &mut self,
+        _context: &mut CliprdrClientContext,
+        formats: &[freerdp::client::CliprdrFormat],
+    ) -> Result<()> {
+        dbg!(formats);
+        Ok(())
+    }
+
+    fn server_format_list_response(&mut self, _context: &mut CliprdrClientContext) -> Result<()> {
+        Ok(())
+    }
+
+    fn server_format_data_request(
+        &mut self,
+        _context: &mut CliprdrClientContext,
+        format: freerdp::channels::cliprdr::Format,
+    ) -> Result<()> {
+        dbg!(format);
+        Err(RdpError::Unsupported)
+    }
+
+    fn server_format_data_response(
+        &mut self,
+        _context: &mut CliprdrClientContext,
+        _data: &[u8],
+    ) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct RdpContextHandler {
     tx: futures::channel::mpsc::Sender<RdpEvent>,
 }
@@ -160,7 +216,7 @@ impl RdpContextHandler {
     }
 
     fn send(&mut self, event: RdpEvent) -> Result<()> {
-        block_on(async { self.tx.send(event).await })
+        block_on(async { self.tx.feed(event).await })
             .map_err(|e| RdpError::Failed(format!("{}", e)))?;
         Ok(())
     }
@@ -212,5 +268,9 @@ impl freerdp::client::Handler for RdpContextHandler {
 
         let handler = context.handler_mut().unwrap();
         handler.send_desktop_resize(w, h)
+    }
+
+    fn clipboard_connected(&mut self, mut clip: CliprdrClientContext) {
+        clip.register_handler(RdpClipHandler)
     }
 }
