@@ -1,4 +1,4 @@
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 
 use freerdp::{
     channels::cliprdr::GeneralCapabilities,
@@ -8,6 +8,8 @@ use freerdp::{
     update, RdpError, Result, PIXEL_FORMAT_BGRA32,
 };
 use futures::{executor::block_on, SinkExt};
+
+use crate::util::mime_from_format;
 
 #[derive(Debug)]
 pub(crate) struct CursorInner {
@@ -42,6 +44,12 @@ pub(crate) enum RdpEvent {
     CursorSet(Cursor),
     CursorSetNull,
     CursorSetDefault,
+    ClipboardSetContent {
+        formats: Vec<&'static str>,
+    },
+    ClipboardData {
+        data: Vec<u8>,
+    },
 }
 
 #[derive(Debug)]
@@ -122,6 +130,10 @@ impl freerdp::update::UpdateHandler for RdpUpdateHandler {
             return Ok(());
         }
         let (x, y, w, h) = (invalid.x(), invalid.y(), invalid.w(), invalid.h());
+        let x = u32::try_from(x)?;
+        let y = u32::try_from(y)?;
+        let w = u32::try_from(w)?;
+        let h = u32::try_from(h)?;
 
         let handler = context.handler_mut().unwrap();
         handler.send_update_buffer(x, y, w, h)
@@ -153,14 +165,22 @@ impl freerdp::update::UpdateHandler for RdpUpdateHandler {
 }
 
 #[derive(Debug)]
-pub(crate) struct RdpClipHandler;
+pub(crate) struct RdpClipHandler {
+    context: RdpContextHandler,
+}
+
+impl RdpClipHandler {
+    fn new(context: RdpContextHandler) -> Self {
+        Self { context }
+    }
+}
 
 impl CliprdrHandler for RdpClipHandler {
     fn monitor_ready(&mut self, context: &mut CliprdrClientContext) -> Result<()> {
-        let capabilities = GeneralCapabilities::USE_LONG_FORMAT_NAMES
-            | GeneralCapabilities::STREAM_FILECLIP_ENABLED
-            | GeneralCapabilities::FILECLIP_NO_FILE_PATHS
-            | GeneralCapabilities::HUGE_FILE_SUPPORT_ENABLED;
+        let capabilities = GeneralCapabilities::USE_LONG_FORMAT_NAMES;
+        // | GeneralCapabilities::STREAM_FILECLIP_ENABLED
+        // | GeneralCapabilities::FILECLIP_NO_FILE_PATHS
+        // | GeneralCapabilities::HUGE_FILE_SUPPORT_ENABLED;
         context.send_client_general_capabilities(&capabilities)?;
         context.send_client_format_list(&[])
     }
@@ -176,11 +196,15 @@ impl CliprdrHandler for RdpClipHandler {
 
     fn server_format_list(
         &mut self,
-        _context: &mut CliprdrClientContext,
+        context: &mut CliprdrClientContext,
         formats: &[freerdp::client::CliprdrFormat],
     ) -> Result<()> {
-        dbg!(formats);
-        Ok(())
+        let formats: Vec<_> = formats
+            .iter()
+            .filter_map(|f| f.id.map(mime_from_format).flatten())
+            .collect();
+        self.context.send_clipboard_set_content(formats)?;
+        context.send_client_format_list_response(true)
     }
 
     fn server_format_list_response(&mut self, _context: &mut CliprdrClientContext) -> Result<()> {
@@ -199,38 +223,63 @@ impl CliprdrHandler for RdpClipHandler {
     fn server_format_data_response(
         &mut self,
         _context: &mut CliprdrClientContext,
-        _data: &[u8],
+        data: &[u8],
     ) -> Result<()> {
-        Ok(())
+        self.context.send_clipboard_data(data.to_vec())
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct RdpContextHandler {
+struct Inner {
     tx: futures::channel::mpsc::Sender<RdpEvent>,
+    clip: Option<CliprdrClientContext>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct RdpContextHandler {
+    inner: Arc<Mutex<Inner>>,
 }
 
 impl RdpContextHandler {
     pub(crate) fn new(tx: futures::channel::mpsc::Sender<RdpEvent>) -> Self {
-        Self { tx }
+        Self {
+            inner: Arc::new(Mutex::new(Inner { tx, clip: None })),
+        }
     }
 
     fn send(&mut self, event: RdpEvent) -> Result<()> {
-        block_on(async { self.tx.feed(event).await })
+        let mut inner = self.inner.lock().unwrap();
+        block_on(async { inner.tx.feed(event).await })
             .map_err(|e| RdpError::Failed(format!("{}", e)))?;
         Ok(())
     }
 
-    fn send_update_buffer(&mut self, x: i32, y: i32, w: i32, h: i32) -> Result<()> {
-        let x = u32::try_from(x)?;
-        let y = u32::try_from(y)?;
-        let w = u32::try_from(w)?;
-        let h = u32::try_from(h)?;
+    fn send_update_buffer(&mut self, x: u32, y: u32, w: u32, h: u32) -> Result<()> {
         self.send(RdpEvent::Update { x, y, w, h })
     }
 
     fn send_desktop_resize(&mut self, w: u32, h: u32) -> Result<()> {
         self.send(RdpEvent::DesktopResize { w, h })
+    }
+
+    fn send_clipboard_set_content(&mut self, formats: Vec<&'static str>) -> Result<()> {
+        self.send(RdpEvent::ClipboardSetContent { formats })
+    }
+
+    fn send_clipboard_data(&mut self, data: Vec<u8>) -> Result<()> {
+        self.send(RdpEvent::ClipboardData { data })
+    }
+
+    pub(crate) fn client_clipboard_request(
+        &self,
+        format: freerdp::channels::cliprdr::Format,
+    ) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+        let clip = inner
+            .clip
+            .as_mut()
+            .ok_or(RdpError::Failed("No clipboard context!".into()))?;
+        clip.send_client_format_data_request(format)
     }
 }
 
@@ -271,6 +320,8 @@ impl freerdp::client::Handler for RdpContextHandler {
     }
 
     fn clipboard_connected(&mut self, mut clip: CliprdrClientContext) {
-        clip.register_handler(RdpClipHandler)
+        clip.register_handler(RdpClipHandler::new(self.clone()));
+        let mut inner = self.inner.lock().unwrap();
+        inner.clip = Some(clip);
     }
 }
