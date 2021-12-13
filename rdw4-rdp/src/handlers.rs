@@ -1,8 +1,8 @@
 use std::sync::{mpsc, Arc, Mutex};
 
 use freerdp::{
-    channels::cliprdr::GeneralCapabilities,
-    client::{CliprdrClientContext, CliprdrHandler, Context},
+    channels::cliprdr::{Format, GeneralCapabilities},
+    client::{CliprdrClientContext, CliprdrFormat, CliprdrHandler, Context},
     graphics::Pointer,
     locale::keyboard_init_ex,
     update, RdpError, Result, PIXEL_FORMAT_BGRA32,
@@ -49,6 +49,9 @@ pub(crate) enum RdpEvent {
     },
     ClipboardData {
         data: Vec<u8>,
+    },
+    ClipboardDataRequest {
+        format: Format,
     },
 }
 
@@ -197,7 +200,7 @@ impl CliprdrHandler for RdpClipHandler {
     fn server_format_list(
         &mut self,
         context: &mut CliprdrClientContext,
-        formats: &[freerdp::client::CliprdrFormat],
+        formats: &[CliprdrFormat],
     ) -> Result<()> {
         let formats: Vec<_> = formats
             .iter()
@@ -214,10 +217,9 @@ impl CliprdrHandler for RdpClipHandler {
     fn server_format_data_request(
         &mut self,
         _context: &mut CliprdrClientContext,
-        format: freerdp::channels::cliprdr::Format,
+        format: Format,
     ) -> Result<()> {
-        dbg!(format);
-        Err(RdpError::Unsupported)
+        self.context.send_clipboard_data_request(format)
     }
 
     fn server_format_data_response(
@@ -270,16 +272,35 @@ impl RdpContextHandler {
         self.send(RdpEvent::ClipboardData { data })
     }
 
-    pub(crate) fn client_clipboard_request(
-        &self,
-        format: freerdp::channels::cliprdr::Format,
-    ) -> Result<()> {
+    fn send_clipboard_data_request(&mut self, format: Format) -> Result<()> {
+        self.send(RdpEvent::ClipboardDataRequest { format })
+    }
+
+    pub(crate) fn client_clipboard_request(&self, format: Format) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
         let clip = inner
             .clip
             .as_mut()
             .ok_or(RdpError::Failed("No clipboard context!".into()))?;
         clip.send_client_format_data_request(format)
+    }
+
+    pub(crate) fn client_clipboard_format_list(&self, list: &[CliprdrFormat]) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+        let clip = inner
+            .clip
+            .as_mut()
+            .ok_or(RdpError::Failed("No clipboard context!".into()))?;
+        clip.send_client_format_list(list)
+    }
+
+    pub(crate) fn client_clipboard_data(&self, data: Option<Vec<u8>>) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+        let clip = inner
+            .clip
+            .as_mut()
+            .ok_or(RdpError::Failed("No clipboard context!".into()))?;
+        clip.send_client_format_data_response(data.as_deref())
     }
 }
 

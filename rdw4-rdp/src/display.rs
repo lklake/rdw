@@ -13,7 +13,7 @@ use rdw::{gtk, DisplayExt};
 use crate::{
     handlers::{RdpContextHandler, RdpEvent},
     notifier::Notifier,
-    util::{format_from_mime, string_from_utf16},
+    util::{format_from_mime, string_from_utf16, utf16_from_utf8},
 };
 
 #[repr(C)]
@@ -27,12 +27,15 @@ pub struct RdwRdpDisplayClass {
 }
 
 mod imp {
+    use crate::util::mime_from_format;
+
     use super::*;
     use freerdp::{
         channels::{
             cliprdr::Format,
             disp::{MonitorFlags, MonitorLayout, Orientation},
         },
+        client::CliprdrFormat,
         input::{KbdFlags, PtrFlags, PtrXFlags, WHEEL_ROTATION_MASK},
     };
     use glib::subclass::Signal;
@@ -53,6 +56,8 @@ mod imp {
         XMouse(PtrXFlags, u16, u16),
         MonitorLayout(Vec<MonitorLayout>),
         ClipboardRequest(Format),
+        ClipboardFormatList(Vec<CliprdrFormat>),
+        ClipboardData(Option<Vec<u8>>),
     }
 
     #[derive(Default)]
@@ -219,6 +224,37 @@ mod imp {
                 }));
                 glib::signal::Inhibit(false)
             }));
+
+            let cb = gdk::traits::DisplayExt::clipboard(&widget.display());
+            let watch_id = cb.connect_changed(clone!(@weak widget => move |clipboard| {
+                let is_local = clipboard.is_local();
+                if let (false, Some(formats)) = (is_local, clipboard.formats()) {
+                    let list = formats.mime_types()
+                                      .iter()
+                                      .map(|m| {
+                                          let id = format_from_mime(m);
+                                          let name = if id.is_some() {
+                                              None
+                                          } else {
+                                              Some(m.to_string())
+                                          };
+                                          CliprdrFormat {
+                                              id,
+                                              name,
+                                          }
+                                      })
+                                      .collect::<Vec<_>>();
+                    if !list.is_empty() {
+                        log::debug!(">clipboard-grab: {:?}", list);
+                        MainContext::default().spawn_local(glib::clone!(@weak widget => async move {
+                            let imp = Self::from_instance(&widget);
+                            let _ = imp.send_event(Event::ClipboardFormatList(list)).await;
+                        }));
+                    }
+                }
+            }));
+
+            self.clipboard.watch_id.set(Some(watch_id));
         }
     }
 
@@ -339,6 +375,34 @@ mod imp {
                         log::warn!("Failed to set clipboard content: {}", e);
                     }
                 }
+                RdpEvent::ClipboardDataRequest { format } => {
+                    glib::MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
+                        let imp = Self::from_instance(&obj);
+                        let mut data = None;
+
+                        if let Some(mime) = mime_from_format(format) {
+                            let cb = gdk::traits::DisplayExt::clipboard(&obj.display());
+                            let res = cb.read_async_future(&[mime], glib::Priority::default()).await;
+                            log::debug!("clipboard-read: {:?}", res);
+                            if let Ok((stream, _)) = res {
+                                let out = gio::MemoryOutputStream::new_resizable();
+                                let res = out.splice_async_future(
+                                    &stream,
+                                    gio::OutputStreamSpliceFlags::CLOSE_SOURCE | gio::OutputStreamSpliceFlags::CLOSE_TARGET,
+                                    glib::Priority::default()).await;
+                                if res.is_ok() {
+                                    let bytes = out.steal_as_bytes();
+                                    if format.is_text() {
+                                        data = utf16_from_utf8(bytes.as_ref()).ok();
+                                    } else {
+                                        data = Some(bytes.to_vec());
+                                    }
+                                }
+                            }
+                        }
+                        let _ = imp.send_event(Event::ClipboardData(data)).await;
+                    }));
+                }
             }
         }
 
@@ -407,6 +471,14 @@ mod imp {
                             Event::ClipboardRequest(format) => {
                                 let handler = ctxt.handler_mut().unwrap();
                                 handler.client_clipboard_request(format)?;
+                            }
+                            Event::ClipboardFormatList(list) => {
+                                let handler = ctxt.handler_mut().unwrap();
+                                handler.client_clipboard_format_list(&list)?;
+                            }
+                            Event::ClipboardData(data) => {
+                                let handler = ctxt.handler_mut().unwrap();
+                                handler.client_clipboard_data(data)?;
                             }
                         }
                         notifier.read_sync()?;
