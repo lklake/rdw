@@ -105,6 +105,11 @@ mod imp {
             let (tx, rx) = futures::channel::mpsc::channel(1);
             let mut context = Context::new(RdpContextHandler::new(tx));
             context.settings.set_support_display_control(true);
+            context.settings.set_os_major_type(freerdp::sys::OSMAJORTYPE_UNIX);
+            context
+                .settings
+                .set_os_minor_type(freerdp::sys::OSMINORTYPE_NATIVE_WAYLAND);
+
             Self {
                 context: Arc::new(Mutex::new(context)),
                 state: RefCell::new(None),
@@ -557,16 +562,19 @@ mod imp {
                 }
             }
             Event::ClipboardRequest(format) => {
-                let handler = ctxt.handler_mut().unwrap();
-                handler.client_clipboard_request(format)?;
+                if let Some(clip) = ctxt.cliprdr_mut() {
+                    clip.send_client_format_data_request(format)?;
+                }
             }
             Event::ClipboardFormatList(list) => {
-                let handler = ctxt.handler_mut().unwrap();
-                handler.client_clipboard_format_list(&list)?;
+                if let Some(clip) = ctxt.cliprdr_mut() {
+                    clip.send_client_format_list(&list)?;
+                }
             }
             Event::ClipboardData(data) => {
-                let handler = ctxt.handler_mut().unwrap();
-                handler.client_clipboard_data(data)?;
+                if let Some(clip) = ctxt.cliprdr_mut() {
+                    clip.send_client_format_data_response(data.as_deref())?;
+                }
             }
         }
         Ok(())

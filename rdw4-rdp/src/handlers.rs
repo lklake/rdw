@@ -124,14 +124,14 @@ struct RdpUpdateHandler;
 impl freerdp::update::UpdateHandler for RdpUpdateHandler {
     type ContextHandler = RdpContextHandler;
 
-    fn begin_paint(context: &mut freerdp::client::Context<Self::ContextHandler>) -> Result<()> {
+    fn begin_paint(context: &mut Context<Self::ContextHandler>) -> Result<()> {
         let gdi = context.gdi().ok_or(RdpError::Unsupported)?;
         let mut primary = gdi.primary().ok_or(RdpError::Unsupported)?;
         primary.hdc().hwnd().invalid().set_null(true);
         Ok(())
     }
 
-    fn end_paint(context: &mut freerdp::client::Context<Self::ContextHandler>) -> Result<()> {
+    fn end_paint(context: &mut Context<Self::ContextHandler>) -> Result<()> {
         let gdi = context.gdi().ok_or(RdpError::Unsupported)?;
         let mut primary = gdi.primary().ok_or(RdpError::Unsupported)?;
         let invalid = primary.hdc().hwnd().invalid();
@@ -149,19 +149,19 @@ impl freerdp::update::UpdateHandler for RdpUpdateHandler {
     }
 
     fn set_bounds(
-        _context: &mut freerdp::client::Context<Self::ContextHandler>,
+        _context: &mut Context<Self::ContextHandler>,
         bounds: &update::Bounds,
     ) -> Result<()> {
         dbg!(bounds);
         Ok(())
     }
 
-    fn synchronize(_context: &mut freerdp::client::Context<Self::ContextHandler>) -> Result<()> {
+    fn synchronize(_context: &mut Context<Self::ContextHandler>) -> Result<()> {
         dbg!();
         Ok(())
     }
 
-    fn desktop_resize(context: &mut freerdp::client::Context<Self::ContextHandler>) -> Result<()> {
+    fn desktop_resize(context: &mut Context<Self::ContextHandler>) -> Result<()> {
         let mut gdi = context.gdi().ok_or(RdpError::Unsupported)?;
         let (w, h) = (
             context.settings.desktop_width(),
@@ -262,8 +262,6 @@ impl CliprdrHandler for RdpClipHandler {
 #[derive(Debug)]
 struct Inner {
     tx: futures::channel::mpsc::Sender<RdpEvent>,
-    clip: Option<CliprdrClientContext>,
-    encomsp: Option<EncomspClientContext>,
 }
 
 #[derive(Clone, Debug)]
@@ -276,8 +274,6 @@ impl RdpContextHandler {
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 tx,
-                clip: None,
-                encomsp: None,
             })),
         }
     }
@@ -308,37 +304,10 @@ impl RdpContextHandler {
     fn send_clipboard_data_request(&mut self, format: Format) -> Result<()> {
         self.send(RdpEvent::ClipboardDataRequest { format })
     }
-
-    pub(crate) fn client_clipboard_request(&self, format: Format) -> Result<()> {
-        let mut inner = self.inner.lock().unwrap();
-        let clip = inner
-            .clip
-            .as_mut()
-            .ok_or(RdpError::Failed("No clipboard context!".into()))?;
-        clip.send_client_format_data_request(format)
-    }
-
-    pub(crate) fn client_clipboard_format_list(&self, list: &[CliprdrFormat]) -> Result<()> {
-        let mut inner = self.inner.lock().unwrap();
-        let clip = inner
-            .clip
-            .as_mut()
-            .ok_or(RdpError::Failed("No clipboard context!".into()))?;
-        clip.send_client_format_list(list)
-    }
-
-    pub(crate) fn client_clipboard_data(&self, data: Option<Vec<u8>>) -> Result<()> {
-        let mut inner = self.inner.lock().unwrap();
-        let clip = inner
-            .clip
-            .as_mut()
-            .ok_or(RdpError::Failed("No clipboard context!".into()))?;
-        clip.send_client_format_data_response(data.as_deref())
-    }
 }
 
 impl freerdp::client::Handler for RdpContextHandler {
-    fn authenticate(&mut self, context: &mut freerdp::client::Context<Self>) -> Result<()> {
+    fn authenticate(&mut self, context: &mut Context<Self>) -> Result<()> {
         let (tx, rx) = mpsc::channel();
         self.send(RdpEvent::Authenticate {
             tx,
@@ -349,7 +318,7 @@ impl freerdp::client::Handler for RdpContextHandler {
         Ok(())
     }
 
-    fn post_connect(&mut self, context: &mut freerdp::client::Context<Self>) -> Result<()> {
+    fn post_connect(&mut self, context: &mut Context<Self>) -> Result<()> {
         context.instance.gdi_init(PIXEL_FORMAT_BGRA32)?;
 
         let gdi = context.gdi().ok_or(RdpError::Unsupported)?;
@@ -373,15 +342,11 @@ impl freerdp::client::Handler for RdpContextHandler {
         handler.send_desktop_resize(w, h)
     }
 
-    fn clipboard_connected(&mut self, mut clip: CliprdrClientContext) {
+    fn clipboard_connected(&mut self, clip: &mut CliprdrClientContext) {
         clip.register_handler(RdpClipHandler::new(self.clone()));
-        let mut inner = self.inner.lock().unwrap();
-        inner.clip = Some(clip);
     }
 
-    fn encomsp_connected(&mut self, mut encomsp: EncomspClientContext) {
+    fn encomsp_connected(&mut self, encomsp: &mut EncomspClientContext) {
         encomsp.register_handler(RdpEncomspHandler::new(self.clone()));
-        let mut inner = self.inner.lock().unwrap();
-        inner.encomsp = Some(encomsp);
     }
 }
