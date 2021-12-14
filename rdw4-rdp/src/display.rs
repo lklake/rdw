@@ -45,7 +45,10 @@ mod imp {
     use rdw::gtk::{gdk, gio, glib::MainContext};
     use std::{
         cell::{Cell, RefCell},
-        sync::{mpsc::Sender, Arc, Mutex},
+        sync::{
+            mpsc::{Receiver, Sender},
+            Arc, Mutex,
+        },
         thread::JoinHandle,
     };
 
@@ -105,7 +108,9 @@ mod imp {
             let (tx, rx) = futures::channel::mpsc::channel(1);
             let mut context = Context::new(RdpContextHandler::new(tx));
             context.settings.set_support_display_control(true);
-            context.settings.set_os_major_type(freerdp::sys::OSMAJORTYPE_UNIX);
+            context
+                .settings
+                .set_os_major_type(freerdp::sys::OSMAJORTYPE_UNIX);
             context
                 .settings
                 .set_os_minor_type(freerdp::sys::OSMINORTYPE_NATIVE_WAYLAND);
@@ -434,38 +439,12 @@ mod imp {
                 ctxt.instance.connect()?;
                 drop(ctxt);
 
-                let notifier_handle = notifier.handle();
-                loop {
-                    let handles = {
-                        let mut ctxt = context.lock().unwrap();
-                        if ctxt.instance.shall_disconnect() {
-                            break;
-                        }
+                let res = freerdp_thread_loop(&mut context, rx, notifier);
 
-                        ctxt.event_handles().unwrap()
-                    };
-
-                    let mut handles: Vec<_> = handles.iter().collect();
-                    handles.push(&notifier_handle);
-                    wait_for_multiple_objects(&handles, false, None).unwrap();
-
-                    if let WaitResult::Object(_) = notifier_handle.wait(Some(&Duration::ZERO))? {
-                        let e = rx
-                            .recv()
-                            .map_err(|e| RdpError::Failed(format!("recv(): {}", e)))?;
-                        dispatch_client_event(&mut context, e)?;
-                        notifier.read_sync()?;
-                    }
-
-                    let mut ctxt = context.lock().unwrap();
-                    if !ctxt.check_event_handles() {
-                        if let Err(e) = ctxt.last_error() {
-                            eprintln!("{}", e);
-                            break;
-                        }
-                    }
-                }
-                Ok(())
+                let mut ctxt = context.lock().unwrap();
+                let _ = ctxt.instance.disconnect();
+                log::debug!("freerdp thread end: {:?}", res);
+                res
             });
 
             self.thread.set(thread).unwrap();
@@ -533,6 +512,46 @@ mod imp {
                 _ => f(&mut self.context.lock().unwrap().settings),
             }
         }
+    }
+
+    fn freerdp_thread_loop(
+        context: &mut Arc<Mutex<Context<RdpContextHandler>>>,
+        rx: Receiver<Event>,
+        notifier: Notifier,
+    ) -> Result<()> {
+        let notifier_handle = notifier.handle();
+        loop {
+            let handles = {
+                let mut ctxt = context.lock().unwrap();
+                if ctxt.instance.shall_disconnect() {
+                    break;
+                }
+
+                ctxt.event_handles().unwrap()
+            };
+
+            let mut handles: Vec<_> = handles.iter().collect();
+            handles.push(&notifier_handle);
+            wait_for_multiple_objects(&handles, false, None).unwrap();
+
+            if let WaitResult::Object(_) = notifier_handle.wait(Some(&Duration::ZERO))? {
+                let e = rx
+                    .recv()
+                    .map_err(|e| RdpError::Failed(format!("recv(): {}", e)))?;
+                dispatch_client_event(context, e)?;
+                notifier.read_sync()?;
+            }
+
+            let mut ctxt = context.lock().unwrap();
+            if !ctxt.check_event_handles() {
+                if let Err(e) = ctxt.last_error() {
+                    eprintln!("{}", e);
+                    break;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn dispatch_client_event(

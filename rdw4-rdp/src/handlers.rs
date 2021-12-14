@@ -272,9 +272,7 @@ pub(crate) struct RdpContextHandler {
 impl RdpContextHandler {
     pub(crate) fn new(tx: futures::channel::mpsc::Sender<RdpEvent>) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(Inner {
-                tx,
-            })),
+            inner: Arc::new(Mutex::new(Inner { tx })),
         }
     }
 
