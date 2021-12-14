@@ -35,7 +35,7 @@ mod imp {
             cliprdr::Format,
             disp::{MonitorFlags, MonitorLayout, Orientation},
         },
-        client::CliprdrFormat,
+        client::{CliprdrFormat, Context},
         input::{KbdFlags, PtrFlags, PtrXFlags, WHEEL_ROTATION_MASK},
     };
     use glib::subclass::Signal;
@@ -90,7 +90,7 @@ mod imp {
 
     #[derive(Debug)]
     pub struct Display {
-        pub(crate) context: Arc<Mutex<freerdp::client::Context<RdpContextHandler>>>,
+        pub(crate) context: Arc<Mutex<Context<RdpContextHandler>>>,
         state: RefCell<Option<RdpEvent>>,
         thread: OnceCell<JoinHandle<Result<()>>>,
         tx: OnceCell<Sender<Event>>,
@@ -103,7 +103,7 @@ mod imp {
     impl Default for Display {
         fn default() -> Self {
             let (tx, rx) = futures::channel::mpsc::channel(1);
-            let mut context = freerdp::client::Context::new(RdpContextHandler::new(tx));
+            let mut context = Context::new(RdpContextHandler::new(tx));
             context.settings.set_support_display_control(true);
             Self {
                 context: Arc::new(Mutex::new(context)),
@@ -421,7 +421,7 @@ mod imp {
             }));
 
             let notifier = self.notifier.clone();
-            let context = self.context.clone();
+            let mut context = self.context.clone();
             let (tx, rx) = mpsc::channel();
             self.tx.set(tx).unwrap();
             let thread = thread::spawn(move || {
@@ -431,59 +431,28 @@ mod imp {
 
                 let notifier_handle = notifier.handle();
                 loop {
-                    let mut ctxt = context.lock().unwrap();
-                    if ctxt.instance.shall_disconnect() {
-                        break;
-                    }
+                    let handles = {
+                        let mut ctxt = context.lock().unwrap();
+                        if ctxt.instance.shall_disconnect() {
+                            break;
+                        }
 
-                    let handles = ctxt.event_handles().unwrap();
+                        ctxt.event_handles().unwrap()
+                    };
+
                     let mut handles: Vec<_> = handles.iter().collect();
                     handles.push(&notifier_handle);
-                    drop(ctxt);
                     wait_for_multiple_objects(&handles, false, None).unwrap();
 
-                    let mut ctxt = context.lock().unwrap();
                     if let WaitResult::Object(_) = notifier_handle.wait(Some(&Duration::ZERO))? {
-                        match rx
+                        let e = rx
                             .recv()
-                            .map_err(|e| RdpError::Failed(format!("recv(): {}", e)))?
-                        {
-                            Event::Keyboard(flags, code) => {
-                                if let Some(mut input) = ctxt.input() {
-                                    input.send_keyboard_event(flags, code)?;
-                                }
-                            }
-                            Event::Mouse(flags, x, y) => {
-                                if let Some(mut input) = ctxt.input() {
-                                    input.send_mouse_event(flags, x, y)?;
-                                }
-                            }
-                            Event::XMouse(flags, x, y) => {
-                                if let Some(mut input) = ctxt.input() {
-                                    input.send_extended_mouse_event(flags, x, y)?;
-                                }
-                            }
-                            Event::MonitorLayout(layout) => {
-                                if let Some(disp) = ctxt.disp_mut() {
-                                    disp.send_monitor_layout(&layout)?;
-                                }
-                            }
-                            Event::ClipboardRequest(format) => {
-                                let handler = ctxt.handler_mut().unwrap();
-                                handler.client_clipboard_request(format)?;
-                            }
-                            Event::ClipboardFormatList(list) => {
-                                let handler = ctxt.handler_mut().unwrap();
-                                handler.client_clipboard_format_list(&list)?;
-                            }
-                            Event::ClipboardData(data) => {
-                                let handler = ctxt.handler_mut().unwrap();
-                                handler.client_clipboard_data(data)?;
-                            }
-                        }
+                            .map_err(|e| RdpError::Failed(format!("recv(): {}", e)))?;
+                        dispatch_client_event(&mut context, e)?;
                         notifier.read_sync()?;
                     }
 
+                    let mut ctxt = context.lock().unwrap();
                     if !ctxt.check_event_handles() {
                         if let Err(e) = ctxt.last_error() {
                             eprintln!("{}", e);
@@ -559,6 +528,48 @@ mod imp {
                 _ => f(&mut self.context.lock().unwrap().settings),
             }
         }
+    }
+
+    fn dispatch_client_event(
+        context: &mut Arc<Mutex<Context<RdpContextHandler>>>,
+        e: Event,
+    ) -> Result<()> {
+        let mut ctxt = context.lock().unwrap();
+        match e {
+            Event::Keyboard(flags, code) => {
+                if let Some(mut input) = ctxt.input() {
+                    input.send_keyboard_event(flags, code)?;
+                }
+            }
+            Event::Mouse(flags, x, y) => {
+                if let Some(mut input) = ctxt.input() {
+                    input.send_mouse_event(flags, x, y)?;
+                }
+            }
+            Event::XMouse(flags, x, y) => {
+                if let Some(mut input) = ctxt.input() {
+                    input.send_extended_mouse_event(flags, x, y)?;
+                }
+            }
+            Event::MonitorLayout(layout) => {
+                if let Some(disp) = ctxt.disp_mut() {
+                    disp.send_monitor_layout(&layout)?;
+                }
+            }
+            Event::ClipboardRequest(format) => {
+                let handler = ctxt.handler_mut().unwrap();
+                handler.client_clipboard_request(format)?;
+            }
+            Event::ClipboardFormatList(list) => {
+                let handler = ctxt.handler_mut().unwrap();
+                handler.client_clipboard_format_list(&list)?;
+            }
+            Event::ClipboardData(data) => {
+                let handler = ctxt.handler_mut().unwrap();
+                handler.client_clipboard_data(data)?;
+            }
+        }
+        Ok(())
     }
 }
 

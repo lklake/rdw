@@ -1,8 +1,14 @@
 use std::sync::{mpsc, Arc, Mutex};
 
 use freerdp::{
-    channels::cliprdr::{Format, GeneralCapabilities},
-    client::{CliprdrClientContext, CliprdrFormat, CliprdrHandler, Context},
+    channels::{
+        cliprdr::{Format, GeneralCapabilities},
+        encomsp::ParticipantCreated,
+    },
+    client::{
+        CliprdrClientContext, CliprdrFormat, CliprdrHandler, Context, EncomspClientContext,
+        EncomspHandler,
+    },
     graphics::Pointer,
     locale::keyboard_init_ex,
     update, RdpError, Result, PIXEL_FORMAT_BGRA32,
@@ -168,6 +174,28 @@ impl freerdp::update::UpdateHandler for RdpUpdateHandler {
 }
 
 #[derive(Debug)]
+pub(crate) struct RdpEncomspHandler {
+    context: RdpContextHandler,
+}
+
+impl RdpEncomspHandler {
+    fn new(context: RdpContextHandler) -> Self {
+        Self { context }
+    }
+}
+
+impl EncomspHandler for RdpEncomspHandler {
+    fn participant_created(
+        &mut self,
+        _ctxt: &mut EncomspClientContext,
+        participant: &ParticipantCreated,
+    ) -> Result<()> {
+        dbg!(&participant);
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct RdpClipHandler {
     context: RdpContextHandler,
 }
@@ -235,6 +263,7 @@ impl CliprdrHandler for RdpClipHandler {
 struct Inner {
     tx: futures::channel::mpsc::Sender<RdpEvent>,
     clip: Option<CliprdrClientContext>,
+    encomsp: Option<EncomspClientContext>,
 }
 
 #[derive(Clone, Debug)]
@@ -245,7 +274,11 @@ pub(crate) struct RdpContextHandler {
 impl RdpContextHandler {
     pub(crate) fn new(tx: futures::channel::mpsc::Sender<RdpEvent>) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(Inner { tx, clip: None })),
+            inner: Arc::new(Mutex::new(Inner {
+                tx,
+                clip: None,
+                encomsp: None,
+            })),
         }
     }
 
@@ -344,5 +377,11 @@ impl freerdp::client::Handler for RdpContextHandler {
         clip.register_handler(RdpClipHandler::new(self.clone()));
         let mut inner = self.inner.lock().unwrap();
         inner.clip = Some(clip);
+    }
+
+    fn encomsp_connected(&mut self, mut encomsp: EncomspClientContext) {
+        encomsp.register_handler(RdpEncomspHandler::new(self.clone()));
+        let mut inner = self.inner.lock().unwrap();
+        inner.encomsp = Some(encomsp);
     }
 }
