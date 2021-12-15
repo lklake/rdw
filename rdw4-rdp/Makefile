@@ -22,6 +22,7 @@ $(GIR): $(HEADER)
 		-Iinst/include --c-include "rdw-rdp.h" \
 		--library=rdw4-rdp --library-path=inst/usr/lib64 \
 		--include=Rdw-4.0 --pkg rdw4 \
+		--pkg freerdp2 \
 		--output $@ \
 		$<
 

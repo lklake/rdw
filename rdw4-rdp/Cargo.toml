@@ -32,4 +32,4 @@ generation = false
 
 [package.metadata.capi.pkg_config]
 filename = "rdw4-rdp"
-requires = "rdw4"
+requires = ["rdw4", "freerdp2"]
