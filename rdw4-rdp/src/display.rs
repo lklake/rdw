@@ -2,7 +2,7 @@ use std::{sync::mpsc, thread, time::Duration};
 
 use freerdp::{
     winpr::{wait_for_multiple_objects, WaitResult},
-    RdpError, Result,
+    RdpErr, RdpErrConnect, RdpError, Result,
 };
 use futures::stream::StreamExt;
 use glib::{clone, subclass::prelude::*, translate::*, SignalHandlerId};
@@ -436,10 +436,26 @@ mod imp {
             self.tx.set(tx).unwrap();
             let thread = thread::spawn(move || {
                 let mut ctxt = context.lock().unwrap();
-                ctxt.instance.connect()?;
+                loop {
+                    let res = ctxt.instance.connect();
+                    if let Some(err) = ctxt.last_error() {
+                        log::warn!("connect error: {:?}", err);
+                        match err {
+                            RdpErr::RdpErrConnect(RdpErrConnect::AuthenticationFailed)
+                            | RdpErr::RdpErrConnect(RdpErrConnect::LogonFailure) => {
+                                ctxt.settings.set_username(None).unwrap();
+                                ctxt.settings.set_password(None).unwrap();
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    }
+                    res?;
+                    break;
+                }
                 drop(ctxt);
 
-                let res = freerdp_thread_loop(&mut context, rx, notifier);
+                let res = freerdp_main_loop(&mut context, rx, notifier);
 
                 let mut ctxt = context.lock().unwrap();
                 let _ = ctxt.instance.disconnect();
@@ -514,7 +530,7 @@ mod imp {
         }
     }
 
-    fn freerdp_thread_loop(
+    fn freerdp_main_loop(
         context: &mut Arc<Mutex<Context<RdpContextHandler>>>,
         rx: Receiver<Event>,
         notifier: Notifier,
@@ -544,8 +560,8 @@ mod imp {
 
             let mut ctxt = context.lock().unwrap();
             if !ctxt.check_event_handles() {
-                if let Err(e) = ctxt.last_error() {
-                    eprintln!("{}", e);
+                if let Some(e) = ctxt.last_error() {
+                    eprintln!("{:?}", e);
                     break;
                 }
             }

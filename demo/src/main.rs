@@ -33,7 +33,7 @@ async fn show_password_dialog(
     app: gtk::Application,
     with_username: bool,
     with_password: bool,
-) -> (String, String) {
+) -> Option<(String, String)> {
     let mut dialog = gtk::MessageDialogBuilder::new()
         .modal(true)
         .buttons(gtk::ButtonsType::Ok)
@@ -66,9 +66,12 @@ async fn show_password_dialog(
         grid.attach(&gtk::Label::new(Some("Password")), 0, 1, 1, 1);
         grid.attach(&password, 1, 1, 1, 1);
     }
-    dialog.run_future().await;
+    let resp = dialog.run_future().await;
     dialog.destroy();
-    (username.text().into(), password.text().into())
+    match resp {
+        gtk::ResponseType::Ok => Some((username.text().into(), password.text().into())),
+        _ => None,
+    }
 }
 
 fn rdp_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
@@ -91,15 +94,18 @@ fn rdp_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
     .unwrap();
 
     rdp.connect_rdp_authenticate(clone!(@weak app => @default-return false, move |rdp| {
-        glib::MainContext::default().block_on(clone!(@weak app => async move {
-            let (username, password) = show_password_dialog(app, true, true).await;
-            let _ = rdp.with_settings(|s| {
-                s.set_username(Some(&username))?;
-                s.set_password(Some(&password))?;
-                Ok(())
-            });
-        }));
-        true
+        glib::MainContext::default().block_on(clone!(@weak app => @default-return false, async move {
+            if let Some((username, password)) = show_password_dialog(app, true, true).await {
+                let _ = rdp.with_settings(|s| {
+                    s.set_username(Some(&username))?;
+                    s.set_password(Some(&password))?;
+                    Ok(())
+                });
+                true
+            } else {
+                false
+            }
+        }))
     }));
 
     rdp.rdp_connect().unwrap();
@@ -141,15 +147,16 @@ fn vnc_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
 
             let creds: Vec<_> = va.iter().map(|v| v.get::<gvnc::ConnectionCredential>().unwrap()).collect();
             glib::MainContext::default().spawn_local(clone!(@weak conn => async move {
-                let (username, password) = show_password_dialog(app, creds.contains(&Username), creds.contains(&Password)).await;
-                if creds.contains(&Username) {
-                    conn.set_credential(Username.into_glib(), &username).unwrap();
-                }
-                if creds.contains(&Password) {
-                    conn.set_credential(Password.into_glib(), &password).unwrap();
-                }
-                if creds.contains(&Clientname) {
-                    conn.set_credential(Clientname.into_glib(), "rdw-vnc").unwrap();
+                if let Some((username, password)) = show_password_dialog(app, creds.contains(&Username), creds.contains(&Password)).await {
+                    if creds.contains(&Username) {
+                        conn.set_credential(Username.into_glib(), &username).unwrap();
+                    }
+                    if creds.contains(&Password) {
+                        conn.set_credential(Password.into_glib(), &password).unwrap();
+                    }
+                    if creds.contains(&Clientname) {
+                        conn.set_credential(Clientname.into_glib(), "rdw-vnc").unwrap();
+                    }
                 }
             }));
         }));
