@@ -102,19 +102,16 @@ impl freerdp::graphics::PointerHandler for RdpPointerHandler {
         context: &mut Context<Self::ContextHandler>,
         _pointer: &Pointer,
     ) -> Result<()> {
-        let ctxt = context.handler_mut().ok_or(RdpError::Unsupported)?;
         let cursor = self.cursor.as_ref().ok_or(RdpError::Unsupported)?;
-        ctxt.send(RdpEvent::CursorSet(cursor.clone()))
+        context.handler.send(RdpEvent::CursorSet(cursor.clone()))
     }
 
     fn set_null(context: &mut Context<Self::ContextHandler>) -> Result<()> {
-        let ctxt = context.handler_mut().ok_or(RdpError::Unsupported)?;
-        ctxt.send(RdpEvent::CursorSetNull)
+        context.handler.send(RdpEvent::CursorSetNull)
     }
 
     fn set_default(context: &mut Context<Self::ContextHandler>) -> Result<()> {
-        let ctxt = context.handler_mut().ok_or(RdpError::Unsupported)?;
-        ctxt.send(RdpEvent::CursorSetDefault)
+        context.handler.send(RdpEvent::CursorSetDefault)
     }
 }
 
@@ -144,8 +141,7 @@ impl freerdp::update::UpdateHandler for RdpUpdateHandler {
         let w = u32::try_from(w)?;
         let h = u32::try_from(h)?;
 
-        let handler = context.handler_mut().unwrap();
-        handler.send_update_buffer(x, y, w, h)
+        context.handler.send_update_buffer(x, y, w, h)
     }
 
     fn set_bounds(
@@ -168,8 +164,7 @@ impl freerdp::update::UpdateHandler for RdpUpdateHandler {
             context.settings.desktop_height(),
         );
         gdi.resize(w, h)?;
-        let handler = context.handler_mut().unwrap();
-        handler.send_desktop_resize(w, h)
+        context.handler.send_desktop_resize(w, h)
     }
 }
 
@@ -336,8 +331,7 @@ impl freerdp::client::Handler for RdpContextHandler {
             context.settings.keyboard_remapping_list().as_deref(),
         );
 
-        let handler = context.handler_mut().unwrap();
-        handler.send_desktop_resize(w, h)
+        context.handler.send_desktop_resize(w, h)
     }
 
     fn clipboard_connected(&mut self, clip: &mut CliprdrClientContext) {

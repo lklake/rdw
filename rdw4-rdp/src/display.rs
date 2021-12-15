@@ -93,7 +93,7 @@ mod imp {
 
     #[derive(Debug)]
     pub struct Display {
-        pub(crate) context: Arc<Mutex<Context<RdpContextHandler>>>,
+        pub(crate) context: Arc<Mutex<Box<Context<RdpContextHandler>>>>,
         state: RefCell<Option<RdpEvent>>,
         thread: OnceCell<JoinHandle<Result<()>>>,
         tx: OnceCell<Sender<Event>>,
@@ -531,7 +531,7 @@ mod imp {
     }
 
     fn freerdp_main_loop(
-        context: &mut Arc<Mutex<Context<RdpContextHandler>>>,
+        context: &mut Arc<Mutex<Box<Context<RdpContextHandler>>>>,
         rx: Receiver<Event>,
         notifier: Notifier,
     ) -> Result<()> {
@@ -571,7 +571,7 @@ mod imp {
     }
 
     fn dispatch_client_event(
-        context: &mut Arc<Mutex<Context<RdpContextHandler>>>,
+        context: &mut Arc<Mutex<Box<Context<RdpContextHandler>>>>,
         e: Event,
     ) -> Result<()> {
         let mut ctxt = context.lock().unwrap();
@@ -592,22 +592,22 @@ mod imp {
                 }
             }
             Event::MonitorLayout(layout) => {
-                if let Some(disp) = ctxt.disp_mut() {
+                if let Some(disp) = ctxt.disp.as_mut() {
                     disp.send_monitor_layout(&layout)?;
                 }
             }
             Event::ClipboardRequest(format) => {
-                if let Some(clip) = ctxt.cliprdr_mut() {
+                if let Some(clip) = ctxt.cliprdr.as_mut() {
                     clip.send_client_format_data_request(format)?;
                 }
             }
             Event::ClipboardFormatList(list) => {
-                if let Some(clip) = ctxt.cliprdr_mut() {
+                if let Some(clip) = ctxt.cliprdr.as_mut() {
                     clip.send_client_format_list(&list)?;
                 }
             }
             Event::ClipboardData(data) => {
-                if let Some(clip) = ctxt.cliprdr_mut() {
+                if let Some(clip) = ctxt.cliprdr.as_mut() {
                     clip.send_client_format_data_response(data.as_deref())?;
                 }
             }
