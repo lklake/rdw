@@ -1,0 +1,51 @@
+include:
+  - remote: 'https://gitlab.freedesktop.org/freedesktop/ci-templates/-/raw/34f4ade9/templates/fedora.yml'
+
+stages:
+  - container
+  - test
+
+variables:
+  FDO_UPSTREAM_REPO: malureau/rdw
+  GIT_SUBMODULE_STRATEGY: recursive
+
+.rdw.fedora:35:
+  variables:
+    FDO_DISTRIBUTION_VERSION: 35
+    FDO_DISTRIBUTION_TAG: '2021-12-12.0'
+
+build-fedora-container:
+  extends:
+  - .fdo.container-build@fedora@x86_64
+  - .rdw.fedora:35
+  stage: container
+  variables:
+    FDO_DISTRIBUTION_PACKAGES: >-
+      cargo
+      freerdp-devel
+      git
+      gobject-introspection-devel
+      gstreamer1-devel
+      gstreamer1-plugins-base-devel
+      gtk4-devel
+      gvnc-devel
+      openssl-devel
+      rust
+      spice-glib-devel
+      usbredir-devel
+      vala
+    FDO_DISTRIBUTION_EXEC: >-
+      cargo install cargo-c
+
+test-build:
+  extends:
+    - .fdo.distribution-image@fedora
+    - .rdw.fedora:35
+  stage: test
+  script:
+    - pushd rdw4
+    - gtk4-broadwayd :0 &
+    - GDK_BACKEND=broadway BROADWAY_DISPLAY=:0 make
+    - sudo make install
+    - popd
+    - cargo build
