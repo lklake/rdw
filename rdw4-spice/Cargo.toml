@@ -9,7 +9,7 @@ default = []
 capi = []
 
 [build-dependencies]
-cargo_metadata = "0.13.1"
+cargo_metadata = "0.14"
 cbindgen = { path = "../cbindgen", features = ["gobject"] }
 
 [dependencies]
