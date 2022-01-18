@@ -79,7 +79,7 @@ mod imp {
             use glib::ParamFlags as Flags;
 
             static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
-                vec![glib::ParamSpec::new_object(
+                vec![glib::ParamSpecObject::new(
                     "connection",
                     "Connection",
                     "gvnc connection",

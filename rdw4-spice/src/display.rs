@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 use glib::{clone, signal::SignalHandlerId, subclass::prelude::*};
 use gtk::{gdk, gio, glib, prelude::*};
 use keycodemap::KEYMAP_XORGEVDEV2XTKBD;
-use rdw::DisplayExt;
+use rdw::{gtk, DisplayExt};
 use spice::prelude::*;
 use spice_client_glib as spice;
 use std::os::unix::io::IntoRawFd;
@@ -78,7 +78,7 @@ mod imp {
             use glib::ParamFlags as Flags;
 
             static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
-                vec![glib::ParamSpec::new_object(
+                vec![glib::ParamSpecObject::new(
                     "session",
                     "Session",
                     "Spice client session",
@@ -247,7 +247,7 @@ mod imp {
                                             imp.clipboard[selection as usize].tx.replace(Some((format, tx)));
                                             main.clipboard_selection_request(selection, format as u32);
                                             if let Some(bytes) = rx.next().await {
-                                                return stream.write_bytes_async_future(&bytes, prio).await.map(|_| ());
+                                                return stream.write_bytes_future(&bytes, prio).await.map(|_| ());
                                             }
                                         }
 
@@ -264,7 +264,7 @@ mod imp {
                             let imp = Self::from_instance(&obj);
                             log::debug!("clipboard-release: {:?}", selection);
                             if let Some(clipboard) = imp.clipboard_from_selection(selection) {
-                                if let Err(e) = clipboard.set_content(gdk::NONE_CONTENT_PROVIDER) {
+                                if let Err(e) = clipboard.set_content(gdk::ContentProvider::NONE) {
                                     log::warn!("Failed to release clipboard: {}", e);
                                 }
                             }
@@ -277,13 +277,13 @@ mod imp {
 
                             if let (Some(mime), Some(clipboard)) = (mime, imp.clipboard_from_selection(selection)) {
                                 glib::MainContext::default().spawn_local(glib::clone!(@weak obj, @weak clipboard, @strong main => async move {
-                                    let res = clipboard.read_async_future(&[mime], glib::Priority::default()).await;
+                                    let res = clipboard.read_future(&[mime], glib::Priority::default()).await;
                                     log::debug!("clipboard-read: {:?}", res);
 
                                     if let Ok((stream, mime)) = res {
                                         if let Some(format) = util::format_from_mime(&mime) {
                                             let out = gio::MemoryOutputStream::new_resizable();
-                                            let res = out.splice_async_future(
+                                            let res = out.splice_future(
                                                 &stream,
                                                 gio::OutputStreamSpliceFlags::CLOSE_SOURCE | gio::OutputStreamSpliceFlags::CLOSE_TARGET,
                                                 glib::Priority::default()).await;
@@ -460,7 +460,7 @@ mod imp {
             let watch_id = clipboard.connect_changed(clone!(@weak obj => move |clipboard| {
                 let imp = Self::from_instance(&obj);
                 let is_local = clipboard.is_local();
-                if let (false, Some(main), Some(formats)) = (is_local, imp.main.upgrade(), clipboard.formats()) {
+                if let (false, Some(main), formats) = (is_local, imp.main.upgrade(), clipboard.formats()) {
                     let mut types = formats.mime_types()
                                            .iter()
                                            .filter_map(|m| util::format_from_mime(m))

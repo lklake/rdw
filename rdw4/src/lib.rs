@@ -30,10 +30,10 @@ mod capi;
 
 #[cfg(not(feature = "bindings"))]
 mod ffi {
-    use super::glib::{self, gflags, translate::IntoGlib, GEnum, StaticType};
+    use super::glib::{self, flags, translate::IntoGlib, Enum, StaticType};
 
-    #[derive(Debug, Eq, PartialEq, Clone, Copy, GEnum)]
-    #[genum(type_name = "RdwScroll")]
+    #[derive(Debug, Eq, PartialEq, Clone, Copy, Enum)]
+    #[enum_type(name = "RdwScroll")]
     #[repr(C)]
     pub enum Scroll {
         Up,
@@ -54,7 +54,7 @@ mod ffi {
         Scroll::static_type().into_glib()
     }
 
-    #[gflags("RdwKeyEvent")]
+    #[flags(name = "RdwKeyEvent")]
     #[repr(C)] // See https://github.com/bitflags/bitflags/pull/187
     pub enum KeyEvent {
         PRESS = 0b0000_0001,
@@ -71,7 +71,7 @@ mod ffi {
         KeyEvent::static_type().into_glib()
     }
 
-    #[gflags("RdwGrab")]
+    #[flags(name = "RdwGrab")]
     #[repr(C)]
     pub enum Grab {
         MOUSE = 0b0000_0001,

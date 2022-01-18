@@ -4,7 +4,7 @@ use std::{
     io::prelude::*,
 };
 
-use glib::{subclass::Signal, ParamFlags, ParamSpec};
+use glib::{subclass::Signal, ParamFlags, ParamSpec, ParamSpecBoolean, ParamSpecString};
 use gtk::{glib, prelude::*, subclass::prelude::*};
 use once_cell::sync::Lazy;
 use usbredirhost::rusb;
@@ -27,14 +27,14 @@ impl ObjectImpl for Device {
     fn properties() -> &'static [ParamSpec] {
         static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
             vec![
-                ParamSpec::new_string(
+                ParamSpecString::new(
                     "name",
                     "Name",
                     "The device name",
                     None,
                     ParamFlags::READWRITE,
                 ),
-                ParamSpec::new_boolean(
+                ParamSpecBoolean::new(
                     "active",
                     "Active",
                     "Device is redirected",
@@ -81,7 +81,7 @@ impl ObjectImpl for Device {
 
 impl Device {
     pub fn set_name(&self, name: &str) {
-        self.instance().set_property("name", name).unwrap();
+        self.instance().set_property("name", name)
     }
 
     pub fn set_device(&self, device: rusb::Device<rusb::Context>) {

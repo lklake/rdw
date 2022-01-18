@@ -1,6 +1,7 @@
 use crate::spice;
 use glib::{clone, MainContext};
 use gtk::{glib, prelude::*};
+use rdw::gtk;
 
 pub struct UsbRedir {}
 
@@ -17,7 +18,7 @@ impl UsbRedir {
                     if manager.is_device_connected(dev) {
                         if let Some(pos) = redir.find_item(|item| same_device(dev, item)) {
                             let item = model.item(pos).unwrap();
-                            item.set_property("active", true).unwrap();
+                            item.set_property("active", true);
                         }
                     }
                 }
@@ -30,12 +31,12 @@ impl UsbRedir {
                     let dev = dev.clone();
                     MainContext::default().spawn_local(clone!(@weak manager, @weak item, @weak redir => async move {
                         match set_device_state(dev, manager, state).await {
-                            Ok(active) => item.set_property("active", active).unwrap(),
+                            Ok(active) => item.set_property("active", active),
                             Err(e) => {
                                 if state {
-                                    item.set_property("active", false).unwrap();
+                                    item.set_property("active", false);
                                 }
-                                redir.emit_by_name("show-error",&[&e.to_string()]).unwrap();
+                                redir.emit_by_name::<()>("show-error",&[&e.to_string()]);
                             },
                         }
                     }));
@@ -45,7 +46,7 @@ impl UsbRedir {
         }));
 
         manager.connect_device_error(clone!(@weak redir => move |_, _, e| {
-            redir.emit_by_name("show-error",&[&e.to_string()]).unwrap();
+            redir.emit_by_name::<()>("show-error",&[&e.to_string()]);
         }));
 
         let free_channels = manager.free_channels();
@@ -84,14 +85,8 @@ async fn set_device_state(
         return Ok(state);
     }
     if state {
-        manager
-            .connect_device_async_future(&dev)
-            .await
-            .map(|_| true)
+        manager.connect_device_future(&dev).await.map(|_| true)
     } else {
-        manager
-            .disconnect_device_async_future(&dev)
-            .await
-            .map(|_| false)
+        manager.disconnect_device_future(&dev).await.map(|_| false)
     }
 }

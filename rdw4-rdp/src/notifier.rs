@@ -5,7 +5,7 @@ use freerdp::{
     RdpError, Result,
 };
 use rdw::gtk::{
-    gio::{self, NONE_CANCELLABLE},
+    gio::{self, Cancellable},
     glib,
     prelude::*,
 };
@@ -48,7 +48,7 @@ impl Notifier {
     pub(crate) async fn notify(&self) -> Result<()> {
         let st = unsafe { gio::UnixOutputStream::with_fd(self.inner.fd) };
         let buffer = 1u64.to_ne_bytes();
-        st.write_all_async_future(buffer, glib::Priority::default())
+        st.write_all_future(buffer, glib::Priority::default())
             .await
             .map_err(|_| RdpError::Failed("notify() failed".into()))?;
         Ok(())
@@ -57,7 +57,7 @@ impl Notifier {
     pub(crate) fn read_sync(&self) -> Result<()> {
         let st = unsafe { gio::UnixInputStream::with_fd(self.inner.fd) };
         let buffer = 1u64.to_ne_bytes();
-        st.read_all(buffer, NONE_CANCELLABLE)
+        st.read_all(buffer, Cancellable::NONE)
             .map_err(|e| RdpError::Failed(format!("read() failed: {}", e)))?;
         Ok(())
     }

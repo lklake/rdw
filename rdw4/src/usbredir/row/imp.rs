@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 
+use gdk_wl::glib::ParamSpecObject;
 use glib::{clone, ParamSpec};
 use gtk::{glib, prelude::*, subclass::prelude::*, CompositeTemplate};
 use once_cell::sync::Lazy;
@@ -33,7 +34,7 @@ impl ObjectSubclass for Row {
 impl ObjectImpl for Row {
     fn properties() -> &'static [ParamSpec] {
         static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
-            vec![ParamSpec::new_object(
+            vec![ParamSpecObject::new(
                 "device",
                 "Device",
                 "The associated device",
@@ -92,7 +93,7 @@ impl ObjectImpl for Row {
             clone!(@weak obj as this => @default-panic, move |s, state| {
                 let imp = Self::from_instance(&this);
                 if let Some(device) = &*imp.device.borrow() {
-                    device.emit_by_name("state-set", &[&state]).unwrap();
+                    device.emit_by_name::<()>("state-set", &[&state]);
                 } else {
                     s.set_state(false);
                 }

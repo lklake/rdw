@@ -1,5 +1,5 @@
 use super::*;
-use glib::{clone, subclass::Signal, ParamSpec};
+use glib::{clone, subclass::Signal, ParamSpec, ParamSpecInt};
 use gtk::CompositeTemplate;
 use once_cell::sync::Lazy;
 use rusb::UsbContext;
@@ -156,7 +156,7 @@ impl ObjectImpl for UsbRedir {
 
     fn properties() -> &'static [ParamSpec] {
         static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
-            vec![ParamSpec::new_int(
+            vec![ParamSpecInt::new(
                 "free-channels",
                 "Free channels",
                 "Number of free channels",
@@ -303,7 +303,7 @@ impl UsbRedir {
         let this = self.instance();
         let item = Device::new();
         item.connect_state_set(clone!(@weak this => move |device, state| {
-            this.emit_by_name("device-state-set", &[device, &state]).unwrap();
+            this.emit_by_name::<()>("device-state-set", &[device, &state]);
         }));
         item.set_device(d);
         self.model.append(&item);

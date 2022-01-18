@@ -14,7 +14,7 @@ use rdw_spice::spice::{self, prelude::*};
 use rdw_vnc::gvnc;
 
 fn show_error(app: gtk::Application, msg: &str) {
-    let mut dialog = gtk::MessageDialogBuilder::new()
+    let mut dialog = gtk::builders::MessageDialogBuilder::new()
         .modal(true)
         .buttons(gtk::ButtonsType::Ok)
         .text(msg);
@@ -34,7 +34,7 @@ async fn show_password_dialog(
     with_username: bool,
     with_password: bool,
 ) -> Option<(String, String)> {
-    let mut dialog = gtk::MessageDialogBuilder::new()
+    let mut dialog = gtk::builders::MessageDialogBuilder::new()
         .modal(true)
         .buttons(gtk::ButtonsType::Ok)
         .text("Credentials required");
@@ -45,7 +45,7 @@ async fn show_password_dialog(
     let ok = dialog.widget_for_response(gtk::ResponseType::Ok).unwrap();
     dialog.set_default_widget(Some(&ok));
     let content = dialog.content_area();
-    let grid = gtk::GridBuilder::new()
+    let grid = gtk::builders::GridBuilder::new()
         .hexpand(true)
         .vexpand(true)
         .halign(gtk::Align::Center)

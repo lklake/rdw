@@ -29,6 +29,7 @@ impl std::fmt::Debug for RdwDisplay {
 pub mod imp {
     use super::*;
     use crate::{error::Error, util};
+    use gdk_wl::wayland_client::{self, Display as WlDisplay, GlobalManager};
     use gl::types::*;
     use glib::{clone, subclass::Signal, SourceId};
     use gtk::{graphene, subclass::prelude::*};
@@ -37,7 +38,6 @@ pub mod imp {
         cell::{Cell, RefCell},
         time::Duration,
     };
-    use wayland_client::{Display as WlDisplay, GlobalManager};
     use wayland_protocols::unstable::{
         pointer_constraints::v1::client::{
             zwp_locked_pointer_v1::ZwpLockedPointerV1,
@@ -155,7 +155,7 @@ pub mod imp {
 
         fn dispose(&self, obj: &Self::Type) {
             if let Some(source) = self.wl_source.take() {
-                glib::source_remove(source);
+                source.remove();
             }
             while let Some(child) = obj.first_child() {
                 child.unparent();
@@ -167,14 +167,14 @@ pub mod imp {
 
             static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
                 vec![
-                    glib::ParamSpec::new_object(
+                    glib::ParamSpecObject::new(
                         "grab-shortcut",
                         "Grab shortcut",
                         "Input devices grab/ungrab shortcut",
                         gtk::ShortcutTrigger::static_type(),
                         Flags::READWRITE,
                     ),
-                    glib::ParamSpec::new_flags(
+                    glib::ParamSpecFlags::new(
                         "grabbed",
                         "grabbed",
                         "Grabbed",
@@ -182,7 +182,7 @@ pub mod imp {
                         Grab::empty().into_glib(),
                         Flags::READABLE,
                     ),
-                    glib::ParamSpec::new_uint(
+                    glib::ParamSpecUInt::new(
                         "synthesize-delay",
                         "Synthesize delay",
                         "Press-and-release synthesize maximum time in ms",
@@ -191,7 +191,7 @@ pub mod imp {
                         100,
                         Flags::READWRITE | Flags::CONSTRUCT,
                     ),
-                    glib::ParamSpec::new_boolean(
+                    glib::ParamSpecBoolean::new(
                         "mouse-absolute",
                         "Mouse absolute",
                         "Whether the mouse is absolute or relative",
@@ -342,13 +342,13 @@ pub mod imp {
             ec.connect_motion(clone!(@weak widget => move |_, x, y| {
                 let imp = Self::from_instance(&widget);
                 if let Some((x, y)) = imp.transform_pos(x, y) {
-                    widget.emit_by_name("motion", &[&x, &y]).unwrap();
+                    widget.emit_by_name::<()>("motion", &[&x, &y]);
                 }
             }));
             ec.connect_enter(clone!(@weak widget => move |_, x, y| {
                 let imp = Self::from_instance(&widget);
                 if let Some((x, y)) = imp.transform_pos(x, y) {
-                    widget.emit_by_name("motion", &[&x, &y]).unwrap();
+                    widget.emit_by_name::<()>("motion", &[&x, &y]);
                 }
             }));
             ec.connect_leave(clone!(@weak widget => move |_| {
@@ -367,18 +367,18 @@ pub mod imp {
 
                     let button = gesture.current_button();
                     if let Some((x, y)) = imp.transform_pos(x, y) {
-                        widget.emit_by_name("motion", &[&x, &y]).unwrap();
+                        widget.emit_by_name::<()>("motion", &[&x, &y]);
                     }
-                    widget.emit_by_name("mouse-press", &[&button]).unwrap();
+                    widget.emit_by_name::<()>("mouse-press", &[&button]);
                 }),
             );
             ec.connect_released(clone!(@weak widget => move |gesture, _n_press, x, y| {
                 let imp = Self::from_instance(&widget);
                 let button = gesture.current_button();
                 if let Some((x, y)) = imp.transform_pos(x, y) {
-                    widget.emit_by_name("motion", &[&x, &y]).unwrap();
+                    widget.emit_by_name::<()>("motion", &[&x, &y]);
                 }
-                widget.emit_by_name("mouse-release", &[&button]).unwrap();
+                widget.emit_by_name::<()>("mouse-release", &[&button]);
             }));
 
             let ec = gtk::EventControllerScroll::new(
@@ -388,14 +388,14 @@ pub mod imp {
             widget.add_controller(&ec);
             ec.connect_scroll(clone!(@weak widget => @default-panic, move |_, dx, dy| {
                 if dy >= 1.0 {
-                    widget.emit_by_name("scroll-discrete", &[&Scroll::Down]).unwrap();
+                    widget.emit_by_name::<()>("scroll-discrete", &[&Scroll::Down]);
                 } else if dy <= -1.0 {
-                    widget.emit_by_name("scroll-discrete", &[&Scroll::Up]).unwrap();
+                    widget.emit_by_name::<()>("scroll-discrete", &[&Scroll::Up]);
                 }
                 if dx >= 1.0 {
-                    widget.emit_by_name("scroll-discrete", &[&Scroll::Right]).unwrap();
+                    widget.emit_by_name::<()>("scroll-discrete", &[&Scroll::Right]);
                 } else if dx <= -1.0 {
-                    widget.emit_by_name("scroll-discrete", &[&Scroll::Left]).unwrap();
+                    widget.emit_by_name::<()>("scroll-discrete", &[&Scroll::Left]);
                 }
                 glib::signal::Inhibit(false)
             }));
@@ -433,7 +433,7 @@ pub mod imp {
                 .allocate(widget, width, height, baseline);
 
             if let Some(timeout_id) = self.resize_timeout_id.take() {
-                glib::source_remove(timeout_id);
+                timeout_id.remove();
             }
             self.resize_timeout_id.set(Some(glib::timeout_add_local(
                 Duration::from_millis(500),
@@ -444,14 +444,14 @@ pub mod imp {
                     let height = height as u32 * sf;
                     let mm = imp.surface()
                                    .as_ref()
-                                   .and_then(|s| gdk::traits::DisplayExt::monitor_at_surface(&widget.display(), s))
+                                   .and_then(|s| Some(gdk::traits::DisplayExt::monitor_at_surface(&widget.display(), s)))
                                    .map(|m| {
                                        let (geom, wmm, hmm) = (m.geometry(), m.width_mm() as u32, m.height_mm() as u32);
-                                       (wmm * width / (geom.width as u32), hmm * height / geom.height as u32)
+                                       (wmm * width / (geom.width() as u32), hmm * height / geom.height() as u32)
                                    }).unwrap_or((0u32, 0u32));
                     if Some((width, height, mm)) != imp.last_resize_request.get() {
                         imp.last_resize_request.set(Some((width, height, mm)));
-                        widget.emit_by_name("resize-request", &[&width, &height, &mm.0, &mm.1]).unwrap();
+                        widget.emit_by_name::<()>("resize-request", &[&width, &height, &mm.0, &mm.1]);
                     }
                     imp.resize_timeout_id.set(None);
                     glib::Continue(false)
@@ -645,18 +645,12 @@ pub mod imp {
                 return;
             }
 
-            //display.remove_controller(ec); here crashes badly
-            glib::idle_add_local(clone!(@weak display => @default-panic, move || {
+            glib::idle_add_local(clone!(@strong display => @default-panic, move || {
                 let imp = Self::from_instance(&display);
-                match imp.grab_ec.upgrade() {
-                    Some(ec) => {
-                        if let Some(widget) = ec.widget() {
-                            widget.remove_controller(&ec);
-                        }
-                        imp.grab_ec.set(None);
-                    },
-                    _ => log::debug!("No grab event-controller?"),
-                };
+                if let Some(ec) = imp.grab_ec.upgrade() {
+                    display.remove_controller(&ec);
+                    imp.grab_ec.set(None);
+                }
                 if let Some(toplevel) = imp.toplevel() {
                     toplevel.restore_system_shortcuts();
                     imp.grabbed.set(imp.grabbed.get() - Grab::KEYBOARD);
@@ -689,17 +683,15 @@ pub mod imp {
             let display = self.instance();
 
             if let Some((keyval, keycode)) = self.last_key_press.take() {
-                display
-                    .emit_by_name("key-event", &[&keyval, &keycode, &KeyEvent::PRESS])
-                    .unwrap();
+                display.emit_by_name::<()>("key-event", &[&keyval, &keycode, &KeyEvent::PRESS]);
             }
 
             if let Some(timeout_id) = self.last_key_press_timeout.take() {
-                glib::source_remove(timeout_id);
+                timeout_id.remove();
             }
         }
 
-        fn key_pressed(&self, ec: &gtk::EventControllerKey, keyval: gdk::keys::Key, keycode: u32) {
+        fn key_pressed(&self, ec: &gtk::EventControllerKey, keyval: gdk::Key, keycode: u32) {
             let display = self.instance();
 
             if let Some(ref e) = ec.current_event() {
@@ -718,7 +710,7 @@ pub mod imp {
             self.emit_last_key_press();
 
             // synthesize press-and-release if within the synthesize-delay boundary, else emit
-            self.last_key_press.set(Some((*keyval, keycode)));
+            self.last_key_press.set(Some((keyval.into_glib(), keycode)));
             self.last_key_press_timeout
                 .set(Some(glib::timeout_add_local(
                     Duration::from_millis(self.synthesize_delay.get() as _),
@@ -730,22 +722,24 @@ pub mod imp {
                 )));
         }
 
-        fn key_released(&self, keyval: gdk::keys::Key, keycode: u32) {
+        fn key_released(&self, keyval: gdk::Key, keycode: u32) {
             let display = self.instance();
 
             if let Some((last_keyval, last_keycode)) = self.last_key_press.get() {
-                if (last_keyval, last_keycode) == (*keyval, keycode) {
+                if (last_keyval, last_keycode) == (keyval.into_glib(), keycode) {
                     self.last_key_press.set(None);
                     if let Some(timeout_id) = self.last_key_press_timeout.take() {
-                        glib::source_remove(timeout_id);
+                        timeout_id.remove();
                     }
 
-                    display
-                        .emit_by_name(
-                            "key-event",
-                            &[&*keyval, &keycode, &(KeyEvent::PRESS | KeyEvent::RELEASE)],
-                        )
-                        .unwrap();
+                    display.emit_by_name::<()>(
+                        "key-event",
+                        &[
+                            &keyval.into_glib(),
+                            &keycode,
+                            &(KeyEvent::PRESS | KeyEvent::RELEASE),
+                        ],
+                    );
                     return;
                 }
             }
@@ -753,9 +747,10 @@ pub mod imp {
             // flush pending key event
             self.emit_last_key_press();
 
-            display
-                .emit_by_name("key-event", &[&*keyval, &keycode, &KeyEvent::RELEASE])
-                .unwrap();
+            display.emit_by_name::<()>(
+                "key-event",
+                &[&keyval.into_glib(), &keycode, &KeyEvent::RELEASE],
+            )
         }
 
         fn try_grab_keyboard(&self) -> bool {
@@ -769,7 +764,7 @@ pub mod imp {
                 _ => return false,
             };
 
-            toplevel.inhibit_system_shortcuts::<gdk::ButtonEvent>(None);
+            toplevel.inhibit_system_shortcuts(None::<&gdk::ButtonEvent>);
             let ec = gtk::EventControllerKey::new();
             ec.set_propagation_phase(gtk::PropagationPhase::Capture);
             ec.connect_key_pressed(clone!(@weak obj, @weak toplevel => @default-panic, move |ec, keyval, keycode, _state| {
@@ -837,7 +832,7 @@ pub mod imp {
                             if let RelEvent::RelativeMotion { dx_unaccel, dy_unaccel, .. } = event {
                                 let scale = obj.scale_factor() as f64;
                                 let (dx, dy) = (dx_unaccel / scale, dy_unaccel / scale);
-                                obj.emit_by_name("motion-relative", &[&dx, &dy]).unwrap();
+                                obj.emit_by_name::<()>("motion-relative", &[&dx, &dy]);
                             }
                         }),
                     );
@@ -858,10 +853,10 @@ pub mod imp {
                 return false;
             }
 
-            let default_seat = gdk::traits::DisplayExt::default_seat(&obj.display());
-
-            for device in default_seat.devices(gdk::SeatCapabilities::POINTER) {
-                self.try_grab_device(device);
+            if let Some(default_seat) = gdk::traits::DisplayExt::default_seat(&obj.display()) {
+                for device in default_seat.devices(gdk::SeatCapabilities::POINTER) {
+                    self.try_grab_device(device);
+                }
             }
 
             true
@@ -930,12 +925,12 @@ pub mod imp {
             let (w, h) = (display.width() * sf, display.height() * sf);
             let (borderw, borderh) = self.borders();
             let (borderw, borderh) = (borderw as i32, borderh as i32);
-            Some(gdk::Rectangle {
-                x: borderw,
-                y: borderh,
-                width: w - borderw * 2,
-                height: h - borderh * 2,
-            })
+            Some(gdk::Rectangle::new(
+                borderw,
+                borderh,
+                w - borderw * 2,
+                h - borderh * 2,
+            ))
         }
 
         // widget -> remote display pos
@@ -948,8 +943,8 @@ pub mod imp {
                     return None;
                 }
                 let (sw, sh) = display.display_size().unwrap();
-                let x = (x - vp.x as f64) * (sw as f64 / vp.width as f64);
-                let y = (y - vp.y as f64) * (sh as f64 / vp.height as f64);
+                let x = (x - vp.x() as f64) * (sw as f64 / vp.width() as f64);
+                let y = (y - vp.y() as f64) * (sh as f64 / vp.height() as f64);
                 Some((x, y))
             })
         }
@@ -960,8 +955,8 @@ pub mod imp {
             let sf = display.scale_factor() as f64;
             self.viewport().map(|vp| {
                 let (sw, sh) = display.display_size().unwrap();
-                let x = x * (vp.width as f64 / sw as f64) + vp.x as f64;
-                let y = y * (vp.height as f64 / sh as f64) + vp.y as f64;
+                let x = x * (vp.width() as f64 / sw as f64) + vp.x() as f64;
+                let y = y * (vp.height() as f64 / sh as f64) + vp.y() as f64;
                 (x / sf as f64, y / sf as f64)
             })
         }
@@ -971,13 +966,13 @@ pub mod imp {
             display
                 .root()
                 .and_then(|r| r.native())
-                .and_then(|n| n.surface())
+                .map(|n| n.surface())
                 .and_then(|s| s.downcast::<gdk::Toplevel>().ok())
         }
 
         fn surface(&self) -> Option<gdk::Surface> {
             let display = self.instance();
-            display.native().and_then(|n| n.surface())
+            display.native().map(|n| n.surface())
         }
 
         fn egl_surface(&self) -> Option<egl::Surface> {
@@ -1186,11 +1181,11 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
     }
 
     fn mouse_absolute(&self) -> bool {
-        self.property("mouse-absolute").unwrap().get().unwrap()
+        self.property("mouse-absolute")
     }
 
     fn set_mouse_absolute(&self, absolute: bool) {
-        self.set_property("mouse-absolute", absolute).unwrap()
+        glib::ObjectExt::set_property(self, "mouse-absolute", &absolute);
     }
 
     fn set_cursor_position(&self, pos: Option<(usize, usize)>) {
@@ -1215,11 +1210,11 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
     }
 
     fn grab_shortcut(&self) -> gtk::ShortcutTrigger {
-        self.property("grab-shortcut").unwrap().get().unwrap()
+        self.property("grab-shortcut")
     }
 
     fn grabbed(&self) -> Grab {
-        self.property("grabbed").unwrap().get().unwrap()
+        self.property("grabbed")
     }
 
     fn update_area(&self, x: i32, y: i32, w: i32, h: i32, stride: i32, data: &[u8]) {
@@ -1357,7 +1352,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
                 gl::Disable(gl::BLEND);
 
                 if let Some(vp) = imp.viewport() {
-                    gl::Viewport(vp.x, vp.y, vp.width, vp.height);
+                    gl::Viewport(vp.x(), vp.y(), vp.width(), vp.height());
                     let flip = imp.dmabuf.borrow().as_ref().map_or(false, |d| d.y0_top);
                     imp.texture_blit(flip);
                 }
@@ -1368,7 +1363,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
     }
 
     fn set_alternative_text(&self, alt_text: &str) {
-        self.update_property(&[(gtk::AccessibleProperty::Description, &alt_text)]);
+        self.update_property(&[gtk::accessible::Property::Description(alt_text)]);
     }
 
     fn connect_key_event<F: Fn(&Self, u32, u32, KeyEvent) + 'static>(

@@ -13,6 +13,3 @@ exclude = [
 ]
 
 default-members = ["demo"]
-
-[patch.crates-io]
-freerdp2 = { git = "https://github.com/elmarco/freerdp-rs.git" }

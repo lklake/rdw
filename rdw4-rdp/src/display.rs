@@ -152,7 +152,7 @@ mod imp {
 
             obj.connect_key_event(clone!(@weak obj => move |_, keyval, keycode, event| {
                 log::debug!("key-event: {:?}", (keyval, keycode, event));
-                if keyval == *gdk::keys::constants::Pause {
+                if keyval == gdk::Key::Pause.into_glib() {
                     unimplemented!()
                 }
                 if let Some(&xt) = KEYMAP_XORGEVDEV2XTKBD.get(keycode as usize) {
@@ -238,7 +238,7 @@ mod imp {
             let cb = gdk::traits::DisplayExt::clipboard(&widget.display());
             let watch_id = cb.connect_changed(clone!(@weak widget => move |clipboard| {
                 let is_local = clipboard.is_local();
-                if let (false, Some(formats)) = (is_local, clipboard.formats()) {
+                if let (false, formats) = (is_local, clipboard.formats()) {
                     let list = formats.mime_types()
                                       .iter()
                                       .map(|m| {
@@ -277,7 +277,7 @@ mod imp {
                     self.state.replace(Some(e));
                     glib::idle_add_local(
                         glib::clone!(@weak obj => @default-return Continue(false), move || {
-                            let res = obj.emit_by_name("rdp-authenticate", &[]).unwrap().unwrap().get::<bool>().unwrap();
+                            let res = obj.emit_by_name::<bool>("rdp-authenticate", &[]);
                             let imp = imp::Display::from_instance(&obj);
                             match imp.state.take().unwrap() {
                                 RdpEvent::Authenticate { settings, tx } => {
@@ -373,7 +373,7 @@ mod imp {
                                 imp.clipboard.tx.replace(Some((format, tx)));
                                 if imp.send_event(Event::ClipboardRequest(format)).await.is_ok() {
                                     if let Some(bytes) = rx.next().await {
-                                        return stream.write_bytes_async_future(&bytes, prio).await.map(|_| ());
+                                        return stream.write_bytes_future(&bytes, prio).await.map(|_| ());
                                     }
                                 }
 
@@ -392,11 +392,11 @@ mod imp {
 
                         if let Some(mime) = mime_from_format(format) {
                             let cb = gdk::traits::DisplayExt::clipboard(&obj.display());
-                            let res = cb.read_async_future(&[mime], glib::Priority::default()).await;
+                            let res = cb.read_future(&[mime], glib::Priority::default()).await;
                             log::debug!("clipboard-read: {:?}", res);
                             if let Ok((stream, _)) = res {
                                 let out = gio::MemoryOutputStream::new_resizable();
-                                let res = out.splice_async_future(
+                                let res = out.splice_future(
                                     &stream,
                                     gio::OutputStreamSpliceFlags::CLOSE_SOURCE | gio::OutputStreamSpliceFlags::CLOSE_TARGET,
                                     glib::Priority::default()).await;
