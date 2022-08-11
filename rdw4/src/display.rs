@@ -29,7 +29,7 @@ impl std::fmt::Debug for RdwDisplay {
 pub mod imp {
     use super::*;
     use crate::{error::Error, util};
-    use gdk_wl::wayland_client::{self, Display as WlDisplay, GlobalManager};
+    use gdk_wl::wayland_client::{self, GlobalManager};
     use gl::types::*;
     use glib::{clone, subclass::Signal, SourceId};
     use gtk::{graphene, subclass::prelude::*};
@@ -552,9 +552,7 @@ pub mod imp {
         }
 
         fn realize_wl(&self, dpy: &gdk_wl::WaylandDisplay) {
-            let display = unsafe {
-                WlDisplay::from_external_display(dpy.wl_display().as_ref().c_ptr() as *mut _)
-            };
+            let display = dpy.wl_display();
             let mut event_queue = display.create_event_queue();
             let attached_display = display.attach(event_queue.token());
             let globals = GlobalManager::new(&attached_display);
