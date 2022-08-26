@@ -10,6 +10,7 @@ use gtk::glib::{
 
 mod content_provider;
 mod display;
+#[cfg(unix)]
 mod egl;
 mod error;
 mod gstaudio;
@@ -20,6 +21,7 @@ mod util;
 
 pub use content_provider::ContentProvider;
 pub use display::*;
+#[cfg(unix)]
 pub use egl::RdwDmabufScanout;
 pub use error::Error;
 pub use gstaudio::*;

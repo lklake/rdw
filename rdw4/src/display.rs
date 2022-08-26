@@ -1,10 +1,13 @@
+#[cfg(unix)]
 use gdk_wl::prelude::*;
 use glib::{signal::SignalHandlerId, subclass::prelude::*, translate::*};
 use gtk::{gdk, glib, prelude::*, subclass::prelude::WidgetImpl};
 
-use crate::{Grab, KeyEvent, RdwDmabufScanout, Scroll};
+#[cfg(unix)]
+use crate::RdwDmabufScanout;
+use crate::{Grab, KeyEvent, Scroll};
 
-#[cfg(not(feature = "bindings"))]
+#[cfg(all(unix, not(feature = "bindings")))]
 use crate::egl;
 
 #[repr(C)]
@@ -28,7 +31,9 @@ impl std::fmt::Debug for RdwDisplay {
 #[cfg(not(feature = "bindings"))]
 pub mod imp {
     use super::*;
-    use crate::{error::Error, util};
+    use crate::error::Error;
+    use crate::util;
+    #[cfg(unix)]
     use gdk_wl::wayland_client::{self, GlobalManager};
     use gl::types::*;
     use glib::{clone, subclass::Signal, SourceId};
@@ -38,6 +43,7 @@ pub mod imp {
         cell::{Cell, RefCell},
         time::Duration,
     };
+    #[cfg(unix)]
     use wayland_protocols::unstable::{
         pointer_constraints::v1::client::{
             zwp_locked_pointer_v1::ZwpLockedPointerV1,
@@ -48,6 +54,7 @@ pub mod imp {
             zwp_relative_pointer_v1::{Event as RelEvent, ZwpRelativePointerV1},
         },
     };
+    #[cfg(unix)]
     use x11::xlib;
 
     unsafe impl ClassStruct for RdwDisplayClass {
@@ -83,21 +90,29 @@ pub mod imp {
         pub(crate) shortcuts_inhibited_id: Cell<Option<SignalHandlerId>>,
         pub(crate) grab_ec: glib::WeakRef<gtk::EventControllerKey>,
 
-        // Option, because None means failed to init
+        #[cfg(unix)]
         pub(crate) egl_ctx: OnceCell<egl::Context>,
+        #[cfg(unix)]
         pub(crate) egl_cfg: OnceCell<egl::Config>,
+        #[cfg(unix)]
         pub(crate) egl_surf: OnceCell<egl::Surface>,
 
         pub(crate) texture_id: Cell<GLuint>,
         pub(crate) texture_blit_vao: Cell<GLuint>,
         pub(crate) texture_blit_prog: Cell<GLuint>,
         pub(crate) texture_blit_flip_prog: Cell<GLuint>,
+        #[cfg(unix)]
         pub(crate) dmabuf: RefCell<Option<RdwDmabufScanout>>,
 
+        #[cfg(unix)]
         pub(crate) wl_source: Cell<Option<glib::SourceId>>,
+        #[cfg(unix)]
         pub(crate) wl_rel_manager: OnceCell<wayland_client::Main<ZwpRelativePointerManagerV1>>,
+        #[cfg(unix)]
         pub(crate) wl_rel_pointer: RefCell<Option<wayland_client::Main<ZwpRelativePointerV1>>>,
+        #[cfg(unix)]
         pub(crate) wl_pointer_constraints: OnceCell<wayland_client::Main<ZwpPointerConstraintsV1>>,
+        #[cfg(unix)]
         pub(crate) wl_lock_pointer: RefCell<Option<wayland_client::Main<ZwpLockedPointerV1>>>,
     }
 
@@ -109,6 +124,7 @@ pub mod imp {
         type Class = RdwDisplayClass;
         type Instance = RdwDisplay;
 
+        #[cfg(unix)]
         fn class_init(_klass: &mut Self::Class) {
             // Assume EGL for now, done at class init time but could be done lazily?
             let egl = egl::egl();
@@ -137,6 +153,7 @@ pub mod imp {
                     glib::signal::Inhibit(true)
                 }),
             );
+            #[cfg(unix)]
             gl_area.connect_realize(clone!(@weak obj => move |_| {
                 let imp = Self::from_instance(&obj);
                 if let Err(e) = unsafe { imp.realize_gl() } {
@@ -154,6 +171,7 @@ pub mod imp {
         }
 
         fn dispose(&self, obj: &Self::Type) {
+            #[cfg(unix)]
             if let Some(source) = self.wl_source.take() {
                 source.remove();
             }
@@ -318,6 +336,7 @@ pub mod imp {
                 self.gl_area().set_parent(widget);
             }
 
+            #[cfg(unix)]
             if let Ok(dpy) = widget.display().downcast::<gdk_wl::WaylandDisplay>() {
                 self.realize_wl(&dpy);
             }
@@ -503,12 +522,20 @@ pub mod imp {
 
     impl Display {
         pub(crate) fn clear_current(&self) {
+            #[cfg(unix)]
             if let (Some(dpy), Some(_)) = (self.egl_display(), self.egl_surface()) {
                 let _ = egl::egl().make_current(dpy, None, None, None);
             }
         }
 
+        fn make_current_gl_area(&self) {
+            let area = self.gl_area();
+            area.make_current();
+            area.attach_buffers();
+        }
+
         pub(crate) fn make_current(&self) -> ContextGuard {
+            #[cfg(unix)]
             if let (Some(dpy), surf, Some(ctx)) =
                 (self.egl_display(), self.egl_surface(), self.egl_context())
             {
@@ -517,13 +544,21 @@ pub mod imp {
                     log::warn!("Failed to make current context: {}", e);
                 }
             } else {
-                let area = self.gl_area();
-                area.make_current();
-                area.attach_buffers();
+                self.make_current_gl_area();
             }
+
+            #[cfg(not(unix))]
+            self.make_current_gl_area();
+
             ContextGuard(self)
         }
 
+        #[cfg(not(unix))]
+        fn realize_egl(&self) -> bool {
+            false
+        }
+
+        #[cfg(unix)]
         fn realize_egl(&self) -> bool {
             // necessary on X11 to have an EGL context for dmabuf imports
             if let (Some(dpy), Some(_), Some(xid)) =
@@ -551,6 +586,7 @@ pub mod imp {
             }
         }
 
+        #[cfg(unix)]
         fn realize_wl(&self, dpy: &gdk_wl::WaylandDisplay) {
             let display = dpy.wl_display();
             let mut event_queue = display.create_event_queue();
@@ -662,9 +698,11 @@ pub mod imp {
             let display = self.instance();
 
             if self.grabbed.get().contains(Grab::MOUSE) {
+                #[cfg(unix)]
                 if let Some(lock) = self.wl_lock_pointer.take() {
                     lock.destroy();
                 }
+                #[cfg(unix)]
                 if let Some(rel_pointer) = self.wl_rel_pointer.take() {
                     rel_pointer.destroy();
                 }
@@ -797,6 +835,7 @@ pub mod imp {
             true
         }
 
+        #[cfg(unix)]
         fn try_grab_device(&self, device: gdk::Device) -> bool {
             let device = match device.downcast::<gdk_wl::WaylandDevice>() {
                 Ok(device) => device,
@@ -839,6 +878,11 @@ pub mod imp {
             }
 
             true
+        }
+
+        #[cfg(not(unix))]
+        fn try_grab_device(&self, _device: gdk::Device) -> bool {
+            false
         }
 
         fn try_grab_mouse(&self) -> bool {
@@ -973,26 +1017,31 @@ pub mod imp {
             display.native().map(|n| n.surface())
         }
 
+        #[cfg(unix)]
         fn egl_surface(&self) -> Option<egl::Surface> {
             self.egl_surf.get().copied()
         }
 
+        #[cfg(unix)]
         fn wl_surface(&self) -> Option<wayland_client::protocol::wl_surface::WlSurface> {
             self.surface()
                 .and_then(|s| s.downcast::<gdk_wl::WaylandSurface>().ok())
                 .map(|w| w.wl_surface())
         }
 
+        #[cfg(unix)]
         fn x11_xid(&self) -> Option<xlib::Window> {
             self.surface()
                 .and_then(|s| s.downcast::<gdk_x11::X11Surface>().ok())
                 .map(|s| s.xid())
         }
 
+        #[cfg(unix)]
         pub(crate) fn egl_context(&self) -> Option<egl::Context> {
             self.egl_display().and_then(|_| self.egl_ctx.get().copied())
         }
 
+        #[cfg(unix)]
         pub(crate) fn egl_display(&self) -> Option<egl::Display> {
             let widget = self.instance();
 
@@ -1061,6 +1110,7 @@ pub trait DisplayExt: 'static {
 
     fn update_area(&self, x: i32, y: i32, w: i32, h: i32, stride: i32, data: &[u8]);
 
+    #[cfg(unix)]
     fn set_dmabuf_scanout(&self, s: RdwDmabufScanout);
 
     fn render(&self);
@@ -1247,11 +1297,13 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
                 );
             }
 
+            #[cfg(unix)]
             imp.dmabuf.replace(None);
             imp.gl_area().queue_render();
         }
     }
 
+    #[cfg(unix)]
     fn set_dmabuf_scanout(&self, s: RdwDmabufScanout) {
         // Safety: safe because IsA<Display>
         let self_: &Display = unsafe { self.unsafe_cast_ref::<Display>() };
@@ -1260,7 +1312,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         unsafe {
             ffi::rdw_display_set_dmabuf_scanout(self_.to_glib_none().0, &s);
         }
-        #[cfg(not(feature = "bindings"))]
+        #[cfg(all(unix, not(feature = "bindings")))]
         {
             let imp = imp::Display::from_instance(self_);
             let _ctx = imp.make_current();
@@ -1351,6 +1403,9 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
 
                 if let Some(vp) = imp.viewport() {
                     gl::Viewport(vp.x(), vp.y(), vp.width(), vp.height());
+                    #[cfg(not(unix))]
+                    let flip = false;
+                    #[cfg(unix)]
                     let flip = imp.dmabuf.borrow().as_ref().map_or(false, |d| d.y0_top);
                     imp.texture_blit(flip);
                 }
@@ -1641,6 +1696,7 @@ mod ffi {
 
         pub fn rdw_display_render(dpy: *mut RdwDisplay);
 
+        #[cfg(unix)]
         pub fn rdw_display_set_dmabuf_scanout(
             dpy: *mut RdwDisplay,
             dmabuf: *const RdwDmabufScanout,

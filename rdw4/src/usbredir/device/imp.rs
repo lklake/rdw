@@ -1,8 +1,4 @@
-use std::{
-    cell::{Cell, RefCell},
-    fs::*,
-    io::prelude::*,
-};
+use std::cell::{Cell, RefCell};
 
 use glib::{subclass::Signal, ParamFlags, ParamSpec, ParamSpecBoolean, ParamSpecString};
 use gtk::{glib, prelude::*, subclass::prelude::*};
@@ -102,8 +98,11 @@ impl Device {
     }
 }
 
+#[cfg(unix)]
 fn read_char_attribute(major: u32, minor: u32, attribute: &str) -> std::io::Result<String> {
-    let mut file = File::open(format!("/sys/dev/char/{}:{}/{}", major, minor, attribute))?;
+    use std::io::prelude::*;
+
+    let mut file = std::fs::File::open(format!("/sys/dev/char/{}:{}/{}", major, minor, attribute))?;
     let mut contents = String::new();
     file.read_to_string(&mut contents)?;
     loop {
@@ -116,9 +115,11 @@ fn read_char_attribute(major: u32, minor: u32, attribute: &str) -> std::io::Resu
 }
 
 // TODO: non-linux version, with usb-ids?
+#[cfg(unix)]
 fn device_manufacturer_product(
     device: &rusb::Device<rusb::Context>,
 ) -> std::io::Result<(String, String)> {
+    use std::fs::*;
     use std::os::unix::fs::MetadataExt;
 
     let (bus, addr) = (device.bus_number(), device.address());
@@ -138,4 +139,14 @@ fn device_manufacturer_product(
             "Unknown device",
         ))
     }
+}
+
+#[cfg(not(unix))]
+fn device_manufacturer_product(
+    device: &rusb::Device<rusb::Context>,
+) -> std::io::Result<(String, String)> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        "Unknown device",
+    ))
 }

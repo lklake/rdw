@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use gdk_wl::glib::ParamSpecObject;
+use glib::ParamSpecObject;
 use glib::{clone, ParamSpec};
 use gtk::{glib, prelude::*, subclass::prelude::*, CompositeTemplate};
 use once_cell::sync::Lazy;
