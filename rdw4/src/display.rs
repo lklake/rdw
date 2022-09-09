@@ -682,7 +682,7 @@ pub mod imp {
             glib::idle_add_local(clone!(@strong display => @default-panic, move || {
                 let imp = Self::from_instance(&display);
                 if let Some(ec) = imp.grab_ec.upgrade() {
-                    display.remove_controller(&ec);
+                    ec.widget().remove_controller(&ec);
                     imp.grab_ec.set(None);
                 }
                 if let Some(toplevel) = imp.toplevel() {
