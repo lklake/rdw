@@ -3,7 +3,10 @@ use gtk::{
     glib::{self, translate::*},
 };
 
-use crate::{display::*, egl::RdwDmabufScanout};
+use crate::display::*;
+
+#[cfg(unix)]
+use crate::egl::RdwDmabufScanout;
 
 #[no_mangle]
 pub extern "C" fn rdw_error_quark() -> glib::ffi::GQuark {
@@ -115,6 +118,7 @@ pub extern "C" fn rdw_display_render(dpy: *mut RdwDisplay) {
 
 /// rdw_display_set_dmabuf_scanout:
 /// @dpy: A #RdwDisplay
+#[cfg(unix)]
 #[no_mangle]
 pub extern "C" fn rdw_display_set_dmabuf_scanout(
     dpy: *mut RdwDisplay,
