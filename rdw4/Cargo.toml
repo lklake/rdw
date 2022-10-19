@@ -28,6 +28,7 @@ gst-audio = { package = "gstreamer-audio", version = "0.18" }
 usbredirhost = "0.0.1"
 futures = "0.3.13"
 bitflags = "1.3.2"
+epoxy = "0.1"
 
 [target.'cfg(unix)'.dependencies]
 gdk-wl = { package = "gdk4-wayland", version = "0.4", features = ["v4_4", "egl", "wayland_crate"] }

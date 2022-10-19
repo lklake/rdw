@@ -124,6 +124,33 @@ pub mod imp {
         type Class = RdwDisplayClass;
         type Instance = RdwDisplay;
 
+        #[cfg(not(unix))]
+        fn class_init(_klass: &mut Self::Class) {
+            // Load GL pointers from epoxy (GL context management library used by GTK).
+            {
+                #[cfg(target_os = "macos")]
+                let library =
+                    unsafe { libloading::os::unix::Library::new("libepoxy.0.dylib") }.unwrap();
+                #[cfg(all(unix, not(target_os = "macos")))]
+                let library =
+                    unsafe { libloading::os::unix::Library::new("libepoxy.so.0") }.unwrap();
+                #[cfg(windows)]
+                let library =
+                    libloading::os::windows::Library::open_already_loaded("libepoxy-0.dll")
+                        .or_else(|_| {
+                            libloading::os::windows::Library::open_already_loaded("epoxy-0.dll")
+                        })
+                        .unwrap();
+
+                epoxy::load_with(|name| {
+                    unsafe { library.get::<_>(name.as_bytes()) }
+                        .map(|symbol| *symbol)
+                        .unwrap_or(std::ptr::null())
+                });
+                gl::load_with(|s| epoxy::get_proc_addr(s));
+            }
+        }
+
         #[cfg(unix)]
         fn class_init(_klass: &mut Self::Class) {
             // Assume EGL for now, done at class init time but could be done lazily?
