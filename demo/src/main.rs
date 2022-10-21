@@ -208,6 +208,9 @@ fn make_display(app: &gtk::Application, mut uri: String) -> rdw::Display {
 
 fn main() {
     env_logger::init();
+    unsafe {
+        rdw::setup_logger(log::logger(), log::max_level()).unwrap();
+    }
 
     let app = gtk::Application::new(
         Some("org.gnome.rdw.demo"),
