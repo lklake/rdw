@@ -180,7 +180,6 @@ pub mod imp {
                     glib::signal::Inhibit(true)
                 }),
             );
-            #[cfg(unix)]
             gl_area.connect_realize(clone!(@weak obj => move |_| {
                 let imp = Self::from_instance(&obj);
                 if let Err(e) = unsafe { imp.realize_gl() } {
