@@ -124,7 +124,6 @@ pub mod imp {
         type Class = RdwDisplayClass;
         type Instance = RdwDisplay;
 
-        #[cfg(not(unix))]
         fn class_init(_klass: &mut Self::Class) {
             // Load GL pointers from epoxy (GL context management library used by GTK).
             {
@@ -149,18 +148,6 @@ pub mod imp {
                 });
                 gl::load_with(|s| epoxy::get_proc_addr(s));
             }
-        }
-
-        #[cfg(unix)]
-        fn class_init(_klass: &mut Self::Class) {
-            // Assume EGL for now, done at class init time but could be done lazily?
-            let egl = egl::egl();
-
-            gl::load_with(|s| {
-                egl.get_proc_address(s)
-                    .map(|f| f as _)
-                    .unwrap_or(std::ptr::null())
-            });
         }
     }
 
