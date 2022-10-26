@@ -65,7 +65,6 @@ impl Framebuffer {
                 ("remote-format", remote_format.to_value()),
             ],
         )
-        .unwrap()
         .downcast()
         .unwrap();
         let imp = imp::Framebuffer::from_instance(&fb);

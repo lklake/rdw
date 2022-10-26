@@ -338,7 +338,6 @@ pub fn setup_logger(
     log::set_logger(logger)
 }
 
-/// cbindgen:ignore
 #[cfg(feature = "bindings")]
 extern "Rust" {
     pub fn setup_logger(

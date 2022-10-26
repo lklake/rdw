@@ -13,3 +13,7 @@ exclude = [
 ]
 
 default-members = ["demo"]
+
+[patch.crates-io]
+gvnc = { git = 'https://gitlab.gnome.org/malureau/gtk-vnc-rs.git' }
+spice-client-glib = { git = 'https://gitlab.gnome.org/malureau/spice-gtk-rs.git' }

@@ -59,19 +59,17 @@ pub mod imp {
     impl ObjectImpl for ContentProvider {}
 
     impl ContentProviderImpl for ContentProvider {
-        fn formats(&self, _provider: &Self::Type) -> gdk::ContentFormats {
+        fn formats(&self) -> gdk::ContentFormats {
             self.formats.get().unwrap().clone()
         }
 
         fn write_mime_type_future(
             &self,
-            provider: &Self::Type,
             mime_type: &str,
             stream: &gio::OutputStream,
             io_priority: glib::Priority,
         ) -> Pin<Box<dyn Future<Output = Result<(), glib::Error>> + 'static>> {
-            let imp = Self::from_instance(provider);
-            let future = imp.write_future.get().unwrap()(mime_type, stream, io_priority);
+            let future = self.write_future.get().unwrap()(mime_type, stream, io_priority);
             future.unwrap_or_else(|| {
                 Box::pin(async move {
                     Err(glib::Error::new(
@@ -101,7 +99,7 @@ impl ContentProvider {
         mime_types: &[&str],
         write_future: F,
     ) -> Self {
-        let inst = glib::Object::new::<Self>(&[]).unwrap();
+        let inst = glib::Object::new::<Self>(&[]);
         let imp = imp::ContentProvider::from_instance(&inst);
 
         let mut formats = gdk::ContentFormatsBuilder::new();

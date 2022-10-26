@@ -89,96 +89,88 @@ mod imp {
             PROPERTIES.as_ref()
         }
 
-        fn set_property(
-            &self,
-            _obj: &Self::Type,
-            _id: usize,
-            _value: &glib::Value,
-            pspec: &glib::ParamSpec,
-        ) {
+        fn set_property(&self, _id: usize, _value: &glib::Value, pspec: &glib::ParamSpec) {
             match pspec.name() {
                 _ => unimplemented!(),
             }
         }
 
-        fn property(&self, _obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+        fn property(&self, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
             match pspec.name() {
                 "session" => self.session.to_value(),
                 _ => unimplemented!(),
             }
         }
 
-        fn constructed(&self, obj: &Self::Type) {
-            self.parent_constructed(obj);
+        fn constructed(&self) {
+            self.parent_constructed();
 
-            obj.set_mouse_absolute(true);
+            self.obj().set_mouse_absolute(true);
 
-            obj.connect_key_event(clone!(@weak obj => move |_, keyval, keycode, event| {
-                let imp = Self::from_instance(&obj);
-                log::debug!("key-event: {:?}", (event, keyval, keycode));
-                // TODO: get the correct keymap according to gdk display type
-                if let Some(&xt) = KEYMAP_XORGEVDEV2XTKBD.get(keycode as usize) {
-                    if let Some(input) = imp.input.upgrade() {
-                        if event.contains(rdw::KeyEvent::PRESS|rdw::KeyEvent::RELEASE) {
-                            input.key_press_and_release(xt as _)
-                        } else if event.contains(rdw::KeyEvent::PRESS) {
-                            input.key_press(xt as _);
-                        } else if event.contains(rdw::KeyEvent::RELEASE) {
-                            input.key_release(xt as _);
+            self.obj().connect_key_event(
+                clone!(@weak self as this => move |_, keyval, keycode, event| {
+                    log::debug!("key-event: {:?}", (event, keyval, keycode));
+                    // TODO: get the correct keymap according to gdk display type
+                    if let Some(&xt) = KEYMAP_XORGEVDEV2XTKBD.get(keycode as usize) {
+                        if let Some(input) = this.input.upgrade() {
+                            if event.contains(rdw::KeyEvent::PRESS|rdw::KeyEvent::RELEASE) {
+                                input.key_press_and_release(xt as _)
+                            } else if event.contains(rdw::KeyEvent::PRESS) {
+                                input.key_press(xt as _);
+                            } else if event.contains(rdw::KeyEvent::RELEASE) {
+                                input.key_release(xt as _);
+                            }
                         }
                     }
-                }
-            }));
+                }),
+            );
 
-            obj.connect_motion(clone!(@weak obj => move |_, x, y| {
-                let imp = Self::from_instance(&obj);
+            self.obj().connect_motion(clone!(@weak self as this => move |_, x, y| {
                 log::debug!("motion: {:?}", (x, y));
-                if let Some(input) = imp.input.upgrade() {
-                    input.position(x as _, y as _, imp.nth_monitor as _, imp.last_button_state());
+                if let Some(input) = this.input.upgrade() {
+                    input.position(x as _, y as _, this.nth_monitor as _, this.last_button_state());
                 }
             }));
 
-            obj.connect_motion_relative(clone!(@weak obj => move |_, dx, dy| {
-                let imp = Self::from_instance(&obj);
-                log::debug!("motion-relative: {:?}", (dx, dy));
-                if let Some(input) = imp.input.upgrade() {
-                    input.motion(dx as _, dy as _, imp.last_button_state());
-                }
-            }));
+            self.obj()
+                .connect_motion_relative(clone!(@weak self as this => move |_, dx, dy| {
+                    log::debug!("motion-relative: {:?}", (dx, dy));
+                    if let Some(input) = this.input.upgrade() {
+                        input.motion(dx as _, dy as _, this.last_button_state());
+                    }
+                }));
 
-            obj.connect_mouse_press(clone!(@weak obj => move |_, button| {
-                let imp = Self::from_instance(&obj);
-                log::debug!("mouse-press: {:?}", button);
-                imp.mouse_click(true, button);
-            }));
+            self.obj()
+                .connect_mouse_press(clone!(@weak self as this => move |_, button| {
+                    log::debug!("mouse-press: {:?}", button);
+                    this.mouse_click(true, button);
+                }));
 
-            obj.connect_mouse_release(clone!(@weak obj => move |_, button| {
-                let imp = Self::from_instance(&obj);
-                log::debug!("mouse-release: {:?}", button);
-                imp.mouse_click(false, button);
-            }));
+            self.obj()
+                .connect_mouse_release(clone!(@weak self as this => move |_, button| {
+                    log::debug!("mouse-release: {:?}", button);
+                    this.mouse_click(false, button);
+                }));
 
-            obj.connect_scroll_discrete(clone!(@weak obj => move |_, scroll| {
-                let imp = Self::from_instance(&obj);
-                log::debug!("scroll-discrete: {:?}", scroll);
-                imp.scroll(scroll);
-            }));
+            self.obj()
+                .connect_scroll_discrete(clone!(@weak self as this => move |_, scroll| {
+                    log::debug!("scroll-discrete: {:?}", scroll);
+                    this.scroll(scroll);
+                }));
 
-            obj.connect_resize_request(clone!(@weak obj => move |_, width, height, wmm, hmm| {
-                let imp = Self::from_instance(&obj);
+            self.obj().connect_resize_request(clone!(@weak self as this => move |_, width, height, wmm, hmm| {
                 log::debug!("resize-request: {:?}", (width, height));
-                if let Some(main) = imp.main.upgrade() {
-                    main.update_display_enabled(imp.nth_monitor as _, true, false);
-                    main.update_display_mm(imp.nth_monitor as _, wmm as _, hmm as _, false);
-                    main.update_display(imp.nth_monitor as _, 0, 0, width as _, height as _, true);
+                if let Some(main) = this.main.upgrade() {
+                    main.update_display_enabled(this.nth_monitor as _, true, false);
+                    main.update_display_mm(this.nth_monitor as _, wmm as _, hmm as _, false);
+                    main.update_display(this.nth_monitor as _, 0, 0, width as _, height as _, true);
                 }
             }));
 
             let session = &self.session;
 
-            session.connect_channel_new(clone!(@weak obj => move |_session, channel| {
+            session.connect_channel_new(clone!(@weak self as this => move |_session, channel| {
                 use spice::ChannelType::*;
-                let imp = Self::from_instance(&obj);
 
                 let type_ = match spice::ChannelType::try_from(channel.channel_type()) {
                     Ok(t) => t,
@@ -188,27 +180,25 @@ mod imp {
                 match type_ {
                     Main => {
                         let main = channel.clone().downcast::<spice::MainChannel>().unwrap();
-                        imp.main.set(Some(&main));
+                        this.main.set(Some(&main));
 
-                        main.connect_channel_event(clone!(@weak obj => move |_, event| {
+                        main.connect_channel_event(clone!(@weak this => move |_, event| {
                             use spice::ChannelEvent::*;
 
-                            let imp = Self::from_instance(&obj);
                             if event == Closed {
-                                imp.session.disconnect();
+                                this.session.disconnect();
                             }
                         }));
 
-                        main.connect_main_mouse_update(clone!(@weak obj => move |main| {
+                        main.connect_main_mouse_update(clone!(@weak this => move |main| {
                             let mode = spice::MouseMode::from_bits_truncate(main.mouse_mode());
                             log::debug!("mouse-update: {:?}", mode);
-                            obj.set_mouse_absolute(mode.contains(spice::MouseMode::CLIENT));
+                            this.obj().set_mouse_absolute(mode.contains(spice::MouseMode::CLIENT));
                         }));
 
-                        main.connect_main_clipboard_selection(clone!(@weak obj => move |_main, selection, type_, data| {
-                            let imp = Self::from_instance(&obj);
+                        main.connect_main_clipboard_selection(clone!(@weak this => move |_main, selection, type_, data| {
                             log::debug!("clipboard-data: {:?}", (selection, type_, data.len()));
-                            if let Some((req_type, mut tx)) = imp.clipboard[selection as usize].tx.take() {
+                            if let Some((req_type, mut tx)) = this.clipboard[selection as usize].tx.take() {
                                 if type_ != req_type as u32 {
                                     log::warn!("Didn't get expected type from guest clipboard!");
                                     return;
@@ -219,32 +209,30 @@ mod imp {
                             }
                         }));
 
-                        main.connect_main_clipboard_selection_grab(clone!(@weak obj => move |_main, selection, types| {
-                            let imp = Self::from_instance(&obj);
+                        main.connect_main_clipboard_selection_grab(clone!(@weak this => move |_main, selection, types| {
                             let types: Vec<_> = types.iter()
                                                      .filter_map(|&t| spice::ClipboardFormat::try_from(t as i32).ok())
                                                      .filter_map(util::mime_from_format)
                                                      .collect();
                             log::debug!("clipboard-grab: {:?}", (selection, &types));
-                            if let Some(clipboard) = imp.clipboard_from_selection(selection) {
-                                let content = rdw::ContentProvider::new(&types, clone!(@weak obj => @default-return None, move |mime, stream, prio| {
+                            if let Some(clipboard) = this.clipboard_from_selection(selection) {
+                                let content = rdw::ContentProvider::new(&types, clone!(@weak this => @default-return None, move |mime, stream, prio| {
                                     log::debug!("content-provider-write: {:?}", (mime, stream));
                                     let format = match util::format_from_mime(mime) {
                                         Some(f) => f,
                                         None => return None,
                                     };
 
-                                    Some(Box::pin(clone!(@weak obj, @strong stream => @default-return panic!(), async move {
+                                    Some(Box::pin(clone!(@weak this, @strong stream => @default-return panic!(), async move {
                                         use futures::stream::StreamExt;
 
-                                        let imp = Self::from_instance(&obj);
-                                        if imp.clipboard[selection as usize].tx.borrow().is_some() {
+                                        if this.clipboard[selection as usize].tx.borrow().is_some() {
                                             return Err(glib::Error::new(gio::IOErrorEnum::Failed, "clipboard request pending"));
                                         }
 
-                                        if let Some(main) = imp.main.upgrade() {
+                                        if let Some(main) = this.main.upgrade() {
                                             let (tx, mut rx) = futures::channel::mpsc::channel(1);
-                                            imp.clipboard[selection as usize].tx.replace(Some((format, tx)));
+                                            this.clipboard[selection as usize].tx.replace(Some((format, tx)));
                                             main.clipboard_selection_request(selection, format as u32);
                                             if let Some(bytes) = rx.next().await {
                                                 return stream.write_bytes_future(&bytes, prio).await.map(|_| ());
@@ -260,23 +248,21 @@ mod imp {
                             }
                         }));
 
-                        main.connect_main_clipboard_selection_release(clone!(@weak obj => move |_main, selection| {
-                            let imp = Self::from_instance(&obj);
+                        main.connect_main_clipboard_selection_release(clone!(@weak this => move |_main, selection| {
                             log::debug!("clipboard-release: {:?}", selection);
-                            if let Some(clipboard) = imp.clipboard_from_selection(selection) {
+                            if let Some(clipboard) = this.clipboard_from_selection(selection) {
                                 if let Err(e) = clipboard.set_content(gdk::ContentProvider::NONE) {
                                     log::warn!("Failed to release clipboard: {}", e);
                                 }
                             }
                         }));
 
-                        main.connect_main_clipboard_selection_request(clone!(@weak obj => @default-return false, move |main, selection, type_| {
-                            let imp = Self::from_instance(&obj);
+                        main.connect_main_clipboard_selection_request(clone!(@weak this => @default-return false, move |main, selection, type_| {
                             let mime = spice::ClipboardFormat::try_from(type_ as i32).map_or(None, util::mime_from_format);
                             log::debug!("clipboard-request: {:?}", (selection, mime));
 
-                            if let (Some(mime), Some(clipboard)) = (mime, imp.clipboard_from_selection(selection)) {
-                                glib::MainContext::default().spawn_local(glib::clone!(@weak obj, @weak clipboard, @strong main => async move {
+                            if let (Some(mime), Some(clipboard)) = (mime, this.clipboard_from_selection(selection)) {
+                                glib::MainContext::default().spawn_local(glib::clone!(@weak this, @weak clipboard, @strong main => async move {
                                     let res = clipboard.read_future(&[mime], glib::Priority::default()).await;
                                     log::debug!("clipboard-read: {:?}", res);
 
@@ -308,12 +294,12 @@ mod imp {
                     },
                     Inputs => {
                         let input = channel.clone().downcast::<spice::InputsChannel>().unwrap();
-                        imp.input.set(Some(&input));
+                        this.input.set(Some(&input));
 
-                        input.connect_inputs_modifiers(clone!(@weak obj => move |input| {
+                        input.connect_inputs_modifiers(clone!(@weak this => move |input| {
                             let modifiers = input.key_modifiers();
                             log::debug!("inputs-modifiers: {}", modifiers);
-                            input.connect_channel_event(clone!(@weak obj => move |input, event| {
+                            input.connect_channel_event(clone!(@weak this => move |input, event| {
                                 if event == spice::ChannelEvent::Opened && input.socket().unwrap().family() == gio::SocketFamily::Unix {
                                     log::debug!("on unix socket");
                                 }
@@ -323,9 +309,9 @@ mod imp {
                     }
                     Display => {
                         let dpy = channel.clone().downcast::<spice::DisplayChannel>().unwrap();
-                        imp.display.set(Some(&dpy));
+                        this.display.set(Some(&dpy));
 
-                        dpy.connect_display_primary_create(clone!(@weak obj => move |_| {
+                        dpy.connect_display_primary_create(clone!(@weak this => move |_| {
                             log::debug!("primary-create");
                         }));
 
@@ -333,24 +319,22 @@ mod imp {
                             log::debug!("primary-destroy");
                         });
 
-                        dpy.connect_display_mark(clone!(@weak obj => move |_, mark| {
-                            let imp = Self::from_instance(&obj);
+                        dpy.connect_display_mark(clone!(@weak this => move |_, mark| {
                             log::debug!("primary-mark: {}", mark);
-                            imp.invalidate_monitor();
+                            this.invalidate_monitor();
                         }));
 
-                        dpy.connect_display_invalidate(clone!(@weak obj => move |_, x, y, w, h| {
-                            let imp = Self::from_instance(&obj);
+                        dpy.connect_display_invalidate(clone!(@weak this => move |_, x, y, w, h| {
                             log::debug!("primary-invalidate: {:?}", (x, y, w, h));
-                            imp.invalidate(x as _, y as _, w as _, h as _);
+                            this.invalidate(x as _, y as _, w as _, h as _);
                         }));
 
-                        dpy.connect_gl_scanout_notify(clone!(@weak obj => move |dpy| {
+                        dpy.connect_gl_scanout_notify(clone!(@weak this => move |dpy| {
                             let scanout = dpy.gl_scanout();
                             log::debug!("notify::gl-scanout: {:?}", scanout);
 
                             if let Some(scanout) = scanout {
-                                obj.set_dmabuf_scanout(rdw::RdwDmabufScanout {
+                                this.obj().set_dmabuf_scanout(rdw::RdwDmabufScanout {
                                     width: scanout.width(),
                                     height: scanout.height(),
                                     stride: scanout.stride(),
@@ -362,22 +346,21 @@ mod imp {
                             }
                         }));
 
-                        dpy.connect_gl_draw(clone!(@weak obj => move |dpy, x, y, w, h| {
+                        dpy.connect_gl_draw(clone!(@weak this => move |dpy, x, y, w, h| {
                             log::debug!("gl-draw: {:?}", (x, y, w, h));
-                            obj.render();
+                            this.obj().render();
                             dpy.gl_draw_done();
                         }));
 
-                        dpy.connect_monitors_notify(clone!(@weak obj => move |dpy| {
-                            let imp = Self::from_instance(&obj);
+                        dpy.connect_monitors_notify(clone!(@weak this => move |dpy| {
                             let monitors = dpy.monitors();
                             log::debug!("notify::monitors: {:?}", monitors);
 
-                            let monitor_config = monitors.and_then(|m| m.get(imp.nth_monitor).copied());
+                            let monitor_config = monitors.and_then(|m| m.get(this.nth_monitor).copied());
                             if let Some((0, 0, w, h)) = monitor_config.map(|c| c.geometry()) {
-                                obj.set_display_size(Some((w, h)));
+                                this.obj().set_display_size(Some((w, h)));
                             }
-                            imp.monitor_config.set(monitor_config);
+                            this.monitor_config.set(monitor_config);
                         }));
 
                         ChannelExt::connect(&dpy);
@@ -385,23 +368,23 @@ mod imp {
                     Cursor => {
                         let cursor = channel.clone().downcast::<spice::CursorChannel>().unwrap();
 
-                        cursor.connect_cursor_move(clone!(@weak obj => move |_cursor, x, y| {
+                        cursor.connect_cursor_move(clone!(@weak this => move |_cursor, x, y| {
                             log::debug!("cursor-move: {:?}", (x, y));
-                            obj.set_cursor_position(Some((x as _, y as _)));
+                            this.obj().set_cursor_position(Some((x as _, y as _)));
                         }));
 
-                        cursor.connect_cursor_reset(clone!(@weak obj => move |_cursor| {
+                        cursor.connect_cursor_reset(clone!(@weak this => move |_cursor| {
                             log::debug!("cursor-reset");
-                            obj.define_cursor(None);
+                            this.obj().define_cursor(None);
                         }));
 
-                        cursor.connect_cursor_hide(clone!(@weak obj => move |_cursor| {
+                        cursor.connect_cursor_hide(clone!(@weak this => move |_cursor| {
                             log::debug!("cursor-hide");
                             let cursor = gdk::Cursor::from_name("none", None);
-                            obj.define_cursor(cursor);
+                            this.obj().define_cursor(cursor);
                         }));
 
-                        cursor.connect_cursor_notify(clone!(@weak obj => move |cursor| {
+                        cursor.connect_cursor_notify(clone!(@weak this => move |cursor| {
                             let cursor = cursor.cursor();
                             log::debug!("cursor-notify: {:?}", cursor);
                             if let Some(cursor) = cursor {
@@ -413,9 +396,9 @@ mod imp {
                                             cursor.height(),
                                             0,
                                             0,
-                                            obj.scale_factor()
+                                            this.obj().scale_factor()
                                         );
-                                        obj.define_cursor(Some(cursor));
+                                        this.obj().define_cursor(Some(cursor));
                                     }
                                     e => log::warn!("Unhandled cursor type: {:?}", e),
                                 }
@@ -429,7 +412,7 @@ mod imp {
             }));
         }
 
-        fn dispose(&self, _obj: &Self::Type) {
+        fn dispose(&self) {
             if let Some(id) = self.clipboard[0].watch_id.take() {
                 let clipboard = self.clipboard_from_selection(0).unwrap();
                 clipboard.disconnect(id);
@@ -442,8 +425,8 @@ mod imp {
     }
 
     impl WidgetImpl for Display {
-        fn realize(&self, widget: &Self::Type) {
-            self.parent_realize(widget);
+        fn realize(&self) {
+            self.parent_realize();
 
             self.add_clipboard_watch(0);
             self.add_clipboard_watch(1);
@@ -481,14 +464,14 @@ mod imp {
         }
 
         fn clipboard_from_selection(&self, selection: u32) -> Option<gdk::Clipboard> {
-            let obj = self.instance();
+            let obj = self.obj();
 
             match selection {
                 0 => Some(gdk::traits::DisplayExt::clipboard(
-                    &obj.upcast::<gtk::Widget>().display(),
+                    &obj.upcast_ref::<gtk::Widget>().display(),
                 )),
                 1 => Some(gdk::traits::DisplayExt::primary_clipboard(
-                    &obj.upcast::<gtk::Widget>().display(),
+                    &obj.upcast_ref::<gtk::Widget>().display(),
                 )),
                 _ => {
                     log::warn!("Unsupport clipboard selection: {}", selection);
@@ -620,7 +603,7 @@ glib::wrapper! {
 
 impl Display {
     pub fn new() -> Self {
-        glib::Object::new::<Self>(&[]).unwrap()
+        glib::Object::new::<Self>(&[])
     }
 
     pub fn session(&self) -> &spice::Session {

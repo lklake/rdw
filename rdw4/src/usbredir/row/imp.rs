@@ -45,13 +45,7 @@ impl ObjectImpl for Row {
         PROPERTIES.as_ref()
     }
 
-    fn set_property(
-        &self,
-        _obj: &Self::Type,
-        _id: usize,
-        value: &glib::Value,
-        pspec: &glib::ParamSpec,
-    ) {
+    fn set_property(&self, _id: usize, value: &glib::Value, pspec: &glib::ParamSpec) {
         match pspec.name() {
             "device" => {
                 let device = value
@@ -63,15 +57,15 @@ impl ObjectImpl for Row {
         }
     }
 
-    fn property(&self, _obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+    fn property(&self, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
         match pspec.name() {
             "device" => self.device.borrow().to_value(),
             _ => unimplemented!(),
         }
     }
 
-    fn constructed(&self, obj: &Self::Type) {
-        self.parent_constructed(obj);
+    fn constructed(&self) {
+        self.parent_constructed();
 
         if let Some(device) = &*self.device.borrow() {
             device
@@ -90,9 +84,8 @@ impl ObjectImpl for Row {
         }
 
         self.switch.connect_state_set(
-            clone!(@weak obj as this => @default-panic, move |s, state| {
-                let imp = Self::from_instance(&this);
-                if let Some(device) = &*imp.device.borrow() {
+            clone!(@weak self as this => @default-panic, move |s, state| {
+                if let Some(device) = &*this.device.borrow() {
                     device.emit_by_name::<()>("state-set", &[&state]);
                 } else {
                     s.set_state(false);
@@ -105,8 +98,8 @@ impl ObjectImpl for Row {
     // Needed for direct subclasses of GtkWidget;
     // Here you need to unparent all direct children
     // of your template.
-    fn dispose(&self, obj: &Self::Type) {
-        while let Some(child) = obj.first_child() {
+    fn dispose(&self) {
+        while let Some(child) = self.obj().first_child() {
             child.unparent();
         }
     }

@@ -140,103 +140,107 @@ mod imp {
     impl ObjectImpl for Display {
         fn signals() -> &'static [Signal] {
             static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
-                vec![Signal::builder("rdp-authenticate", &[], <bool>::static_type().into()).build()]
+                vec![Signal::builder("rdp-authenticate")
+                    .return_type_from(<bool>::static_type())
+                    .build()]
             });
             SIGNALS.as_ref()
         }
 
-        fn constructed(&self, obj: &Self::Type) {
-            self.parent_constructed(obj);
+        fn constructed(&self) {
+            self.parent_constructed();
 
-            obj.set_mouse_absolute(true);
+            self.obj().set_mouse_absolute(true);
 
-            obj.connect_key_event(clone!(@weak obj => move |_, keyval, keycode, event| {
+            self.obj().connect_key_event(clone!(@weak self as this => move |_, keyval, keycode, event| {
                 log::debug!("key-event: {:?}", (keyval, keycode, event));
                 if keyval == gdk::Key::Pause.into_glib() {
                     unimplemented!()
                 }
                 if let Some(&xt) = KEYMAP_XORGEVDEV2XTKBD.get(keycode as usize) {
                     log::debug!("xt: {:?}", xt);
-                    MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
-                        let imp = Self::from_instance(&obj);
+                    MainContext::default().spawn_local(glib::clone!(@weak this => async move {
                         let flags = if xt & 0x100 > 0 {
                             KbdFlags::EXTENDED
                         } else {
                             KbdFlags::empty()
                         };
                         if event.contains(rdw::KeyEvent::PRESS) {
-                            let _ = imp.send_event(Event::Keyboard(flags | KbdFlags::DOWN, xt)).await;
+                            let _ = this.send_event(Event::Keyboard(flags | KbdFlags::DOWN, xt)).await;
                         }
                         if event.contains(rdw::KeyEvent::RELEASE) {
-                            let _ = imp.send_event(Event::Keyboard(flags | KbdFlags::RELEASE, xt)).await;
+                            let _ = this.send_event(Event::Keyboard(flags | KbdFlags::RELEASE, xt)).await;
                         }
                     }));
                 }
             }));
 
-            obj.connect_motion(clone!(@weak obj => move |_, x, y| {
-                log::debug!("motion: {:?}", (x, y));
-                MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
-                    let imp = Self::from_instance(&obj);
-                    imp.last_mouse.set((x, y));
-                    let _ = imp.send_event(Event::Mouse(PtrFlags::MOVE, x as _, y as _)).await;
+            self.obj()
+                .connect_motion(clone!(@weak self as this => move |_, x, y| {
+                    log::debug!("motion: {:?}", (x, y));
+                    MainContext::default().spawn_local(glib::clone!(@weak this => async move {
+                        this.last_mouse.set((x, y));
+                        let _ = this.send_event(Event::Mouse(PtrFlags::MOVE, x as _, y as _)).await;
+                    }));
                 }));
-            }));
 
-            obj.connect_motion_relative(clone!(@weak obj => move |_, dx, dy| {
-                log::debug!("motion-relative: {:?}", (dx, dy));
-            }));
-
-            obj.connect_mouse_press(clone!(@weak obj => move |_, button| {
-                log::debug!("mouse-press: {:?}", button);
-                MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
-                    let imp = Self::from_instance(&obj);
-                    let _ = imp.mouse_click(true, button).await;
+            self.obj()
+                .connect_motion_relative(clone!(@weak self as this => move |_, dx, dy| {
+                    log::debug!("motion-relative: {:?}", (dx, dy));
                 }));
-            }));
 
-            obj.connect_mouse_release(clone!(@weak obj => move |_, button| {
-                log::debug!("mouse-release: {:?}", button);
-                MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
-                    let imp = Self::from_instance(&obj);
-                    let _ = imp.mouse_click(false, button).await;
+            self.obj()
+                .connect_mouse_press(clone!(@weak self as this => move |_, button| {
+                    log::debug!("mouse-press: {:?}", button);
+                    MainContext::default().spawn_local(glib::clone!(@weak this => async move {
+                        let _ = this.mouse_click(true, button).await;
+                    }));
                 }));
-            }));
 
-            obj.connect_resize_request(clone!(@weak obj => move |_, width, height, wmm, hmm| {
-                log::debug!("resize-request: {:?}", (width, height, wmm, hmm));
-                MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
-                    let imp = Self::from_instance(&obj);
-                    let _ = imp.send_event(Event::MonitorLayout(vec![MonitorLayout::new(
-                        MonitorFlags::PRIMARY,
-                        0, 0,
-                        width, height,
-                        wmm, hmm,
-                        Orientation::Landscape,
-                        0, 0
-                    )])).await;
+            self.obj()
+                .connect_mouse_release(clone!(@weak self as this => move |_, button| {
+                    log::debug!("mouse-release: {:?}", button);
+                    MainContext::default().spawn_local(glib::clone!(@weak this => async move {
+                        let _ = this.mouse_click(false, button).await;
+                    }));
                 }));
-            }));
+
+            self.obj().connect_resize_request(
+                clone!(@weak self as this => move |_, width, height, wmm, hmm| {
+                    log::debug!("resize-request: {:?}", (width, height, wmm, hmm));
+                    MainContext::default().spawn_local(glib::clone!(@weak this => async move {
+                        let _ = this.send_event(Event::MonitorLayout(vec![MonitorLayout::new(
+                            MonitorFlags::PRIMARY,
+                            0, 0,
+                            width, height,
+                            wmm, hmm,
+                            Orientation::Landscape,
+                            0, 0
+                        )])).await;
+                    }));
+                }),
+            );
         }
     }
 
     impl WidgetImpl for Display {
-        fn realize(&self, widget: &Self::Type) {
-            self.parent_realize(widget);
+        fn realize(&self) {
+            self.parent_realize();
 
             let ec = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
-            widget.add_controller(&ec);
-            ec.connect_scroll(clone!(@weak widget => @default-panic, move |_, dx, dy| {
-                MainContext::default().spawn_local(glib::clone!(@weak widget => async move {
-                    let imp = Self::from_instance(&widget);
-                    let _ = imp.mouse_scroll(PtrFlags::HWHEEL, dx).await;
-                    let _ = imp.mouse_scroll(PtrFlags::WHEEL, dy).await;
-                }));
-                glib::signal::Inhibit(false)
-            }));
+            self.obj().add_controller(&ec);
+            ec.connect_scroll(
+                clone!(@weak self as this => @default-panic, move |_, dx, dy| {
+                    MainContext::default().spawn_local(glib::clone!(@weak this => async move {
+                        let _ = this.mouse_scroll(PtrFlags::HWHEEL, dx).await;
+                        let _ = this.mouse_scroll(PtrFlags::WHEEL, dy).await;
+                    }));
+                    glib::signal::Inhibit(false)
+                }),
+            );
 
-            let cb = gdk::traits::DisplayExt::clipboard(&widget.display());
-            let watch_id = cb.connect_changed(clone!(@weak widget => move |clipboard| {
+            let cb = gdk::traits::DisplayExt::clipboard(&self.obj().display());
+            let watch_id = cb.connect_changed(clone!(@weak self as this => move |clipboard| {
                 let is_local = clipboard.is_local();
                 if let (false, formats) = (is_local, clipboard.formats()) {
                     let list = formats.mime_types()
@@ -256,9 +260,8 @@ mod imp {
                                       .collect::<Vec<_>>();
                     if !list.is_empty() {
                         log::debug!(">clipboard-grab: {:?}", list);
-                        MainContext::default().spawn_local(glib::clone!(@weak widget => async move {
-                            let imp = Self::from_instance(&widget);
-                            let _ = imp.send_event(Event::ClipboardFormatList(list)).await;
+                        MainContext::default().spawn_local(glib::clone!(@weak this => async move {
+                            let _ = this.send_event(Event::ClipboardFormatList(list)).await;
                         }));
                     }
                 }
@@ -622,7 +625,7 @@ glib::wrapper! {
 
 impl Display {
     pub fn new() -> Self {
-        glib::Object::new::<Self>(&[]).unwrap()
+        glib::Object::new::<Self>(&[])
     }
 
     pub fn with_settings(

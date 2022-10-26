@@ -3,6 +3,20 @@ use gdk_wl::prelude::*;
 use glib::{signal::SignalHandlerId, subclass::prelude::*, translate::*};
 use gtk::{gdk, glib, prelude::*, subclass::prelude::WidgetImpl};
 
+#[cfg(all(unix, not(feature = "bindings")))]
+use gdk_wl::wayland_client::{self, protocol::wl_registry};
+#[cfg(all(unix, not(feature = "bindings")))]
+use wayland_protocols::wp::{
+    pointer_constraints::zv1::client::{
+        zwp_locked_pointer_v1::ZwpLockedPointerV1,
+        zwp_pointer_constraints_v1::{self, ZwpPointerConstraintsV1},
+    },
+    relative_pointer::zv1::client::{
+        zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1,
+        zwp_relative_pointer_v1::{Event as RelEvent, ZwpRelativePointerV1},
+    },
+};
+
 #[cfg(unix)]
 use crate::RdwDmabufScanout;
 use crate::{Grab, KeyEvent, Scroll};
@@ -33,8 +47,6 @@ pub mod imp {
     use super::*;
     use crate::error::Error;
     use crate::util;
-    #[cfg(unix)]
-    use gdk_wl::wayland_client::{self, GlobalManager};
     use gl::types::*;
     use glib::{clone, subclass::Signal, SourceId};
     use gtk::{graphene, subclass::prelude::*};
@@ -42,17 +54,6 @@ pub mod imp {
     use std::{
         cell::{Cell, RefCell},
         time::Duration,
-    };
-    #[cfg(unix)]
-    use wayland_protocols::unstable::{
-        pointer_constraints::v1::client::{
-            zwp_locked_pointer_v1::ZwpLockedPointerV1,
-            zwp_pointer_constraints_v1::{Lifetime, ZwpPointerConstraintsV1},
-        },
-        relative_pointer::v1::client::{
-            zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1,
-            zwp_relative_pointer_v1::{Event as RelEvent, ZwpRelativePointerV1},
-        },
     };
     #[cfg(unix)]
     use x11::xlib;
@@ -105,15 +106,17 @@ pub mod imp {
         pub(crate) dmabuf: RefCell<Option<RdwDmabufScanout>>,
 
         #[cfg(unix)]
+        pub(crate) wl_queue: OnceCell<wayland_client::QueueHandle<crate::Display>>,
+        #[cfg(unix)]
         pub(crate) wl_source: Cell<Option<glib::SourceId>>,
         #[cfg(unix)]
-        pub(crate) wl_rel_manager: OnceCell<wayland_client::Main<ZwpRelativePointerManagerV1>>,
+        pub(crate) wl_rel_manager: OnceCell<ZwpRelativePointerManagerV1>,
         #[cfg(unix)]
-        pub(crate) wl_rel_pointer: RefCell<Option<wayland_client::Main<ZwpRelativePointerV1>>>,
+        pub(crate) wl_rel_pointer: RefCell<Option<ZwpRelativePointerV1>>,
         #[cfg(unix)]
-        pub(crate) wl_pointer_constraints: OnceCell<wayland_client::Main<ZwpPointerConstraintsV1>>,
+        pub(crate) wl_pointer_constraints: OnceCell<ZwpPointerConstraintsV1>,
         #[cfg(unix)]
-        pub(crate) wl_lock_pointer: RefCell<Option<wayland_client::Main<ZwpLockedPointerV1>>>,
+        pub(crate) wl_lock_pointer: RefCell<Option<ZwpLockedPointerV1>>,
     }
 
     #[glib::object_subclass]
@@ -152,8 +155,8 @@ pub mod imp {
     }
 
     impl ObjectImpl for Display {
-        fn constructed(&self, obj: &Self::Type) {
-            self.parent_constructed(obj);
+        fn constructed(&self) {
+            self.parent_constructed();
             self.layout_manager.set(gtk::BinLayout::new()).unwrap();
 
             let gl_area = gtk::GLArea::new();
@@ -162,17 +165,16 @@ pub mod imp {
             gl_area.set_auto_render(false);
             gl_area.set_required_version(3, 2);
             gl_area.connect_render(
-                clone!(@weak obj => @default-return glib::signal::Inhibit(true), move |_, _| {
-                    obj.render();
+                clone!(@weak self as this => @default-return glib::signal::Inhibit(true), move |_, _| {
+                    this.obj().render();
                     glib::signal::Inhibit(true)
                 }),
             );
-            gl_area.connect_realize(clone!(@weak obj => move |_| {
-                let imp = Self::from_instance(&obj);
-                if let Err(e) = unsafe { imp.realize_gl() } {
+            gl_area.connect_realize(clone!(@weak self as this => move |_| {
+                if let Err(e) = unsafe { this.realize_gl() } {
                     log::warn!("Failed to realize gl: {}", e);
                     let e = glib::Error::new(Error::GL, &e);
-                    imp.gl_area().set_error(Some(&e));
+                    this.gl_area().set_error(Some(&e));
                 }
             }));
 
@@ -183,12 +185,12 @@ pub mod imp {
             });
         }
 
-        fn dispose(&self, obj: &Self::Type) {
+        fn dispose(&self) {
             #[cfg(unix)]
             if let Some(source) = self.wl_source.take() {
                 source.remove();
             }
-            while let Some(child) = obj.first_child() {
+            while let Some(child) = self.obj().first_child() {
                 child.unparent();
             }
         }
@@ -234,13 +236,7 @@ pub mod imp {
             PROPERTIES.as_ref()
         }
 
-        fn set_property(
-            &self,
-            _obj: &Self::Type,
-            _id: usize,
-            value: &glib::Value,
-            pspec: &glib::ParamSpec,
-        ) {
+        fn set_property(&self, _id: usize, value: &glib::Value, pspec: &glib::ParamSpec) {
             match pspec.name() {
                 "grab-shortcut" => {
                     let shortcut = value.get().unwrap();
@@ -263,7 +259,7 @@ pub mod imp {
             }
         }
 
-        fn property(&self, _obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+        fn property(&self, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
             match pspec.name() {
                 "grab-shortcut" => self.grab_shortcut.get().to_value(),
                 "grabbed" => self.grabbed.get().to_value(),
@@ -276,57 +272,36 @@ pub mod imp {
         fn signals() -> &'static [Signal] {
             static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
                 vec![
-                    Signal::builder(
-                        "key-event",
-                        &[
-                            u32::static_type().into(),
-                            u32::static_type().into(),
-                            KeyEvent::static_type().into(),
-                        ],
-                        <()>::static_type().into(),
-                    )
-                    .build(),
-                    Signal::builder(
-                        "motion",
-                        &[f64::static_type().into(), f64::static_type().into()],
-                        <()>::static_type().into(),
-                    )
-                    .build(),
-                    Signal::builder(
-                        "motion-relative",
-                        &[f64::static_type().into(), f64::static_type().into()],
-                        <()>::static_type().into(),
-                    )
-                    .build(),
-                    Signal::builder(
-                        "mouse-press",
-                        &[u32::static_type().into()],
-                        <()>::static_type().into(),
-                    )
-                    .build(),
-                    Signal::builder(
-                        "mouse-release",
-                        &[u32::static_type().into()],
-                        <()>::static_type().into(),
-                    )
-                    .build(),
-                    Signal::builder(
-                        "scroll-discrete",
-                        &[Scroll::static_type().into()],
-                        <()>::static_type().into(),
-                    )
-                    .build(),
-                    Signal::builder(
-                        "resize-request",
-                        &[
-                            u32::static_type().into(),
-                            u32::static_type().into(),
-                            u32::static_type().into(),
-                            u32::static_type().into(),
-                        ],
-                        <()>::static_type().into(),
-                    )
-                    .build(),
+                    Signal::builder("key-event")
+                        .param_types([
+                            u32::static_type(),
+                            u32::static_type(),
+                            KeyEvent::static_type(),
+                        ])
+                        .build(),
+                    Signal::builder("motion")
+                        .param_types([f64::static_type(), f64::static_type()])
+                        .build(),
+                    Signal::builder("motion-relative")
+                        .param_types([f64::static_type(), f64::static_type()])
+                        .build(),
+                    Signal::builder("mouse-press")
+                        .param_types([u32::static_type()])
+                        .build(),
+                    Signal::builder("mouse-release")
+                        .param_types([u32::static_type()])
+                        .build(),
+                    Signal::builder("scroll-discrete")
+                        .param_types([Scroll::static_type()])
+                        .build(),
+                    Signal::builder("resize-request")
+                        .param_types([
+                            u32::static_type(),
+                            u32::static_type(),
+                            u32::static_type(),
+                            u32::static_type(),
+                        ])
+                        .build(),
                 ]
             });
             SIGNALS.as_ref()
@@ -334,111 +309,104 @@ pub mod imp {
     }
 
     impl WidgetImpl for Display {
-        fn realize(&self, widget: &Self::Type) {
-            self.parent_realize(widget);
+        fn realize(&self) {
+            self.parent_realize();
 
-            widget.set_sensitive(true);
-            widget.set_focusable(true);
-            widget.set_focus_on_click(true);
+            self.obj().set_sensitive(true);
+            self.obj().set_focusable(true);
+            self.obj().set_focus_on_click(true);
 
             if self.realize_egl() {
                 if let Err(e) = unsafe { self.realize_gl() } {
                     log::warn!("Failed to realize GL: {}", e);
                 }
             } else {
-                self.gl_area().set_parent(widget);
+                self.gl_area().set_parent(&*self.obj());
             }
 
             #[cfg(unix)]
-            if let Ok(dpy) = widget.display().downcast::<gdk_wl::WaylandDisplay>() {
+            if let Ok(dpy) = self.obj().display().downcast::<gdk_wl::WaylandDisplay>() {
                 self.realize_wl(&dpy);
             }
 
             let ec = gtk::EventControllerKey::new();
             ec.set_propagation_phase(gtk::PropagationPhase::Capture);
-            widget.add_controller(&ec);
+            self.obj().add_controller(&ec);
             ec.connect_key_pressed(
-                clone!(@weak widget => @default-panic, move |ec, keyval, keycode, _state| {
-                    let imp = Self::from_instance(&widget);
-                    imp.key_pressed(ec, keyval, keycode);
+                clone!(@weak self as this => @default-panic, move |ec, keyval, keycode, _state| {
+                    this.key_pressed(ec, keyval, keycode);
                     glib::signal::Inhibit(true)
                 }),
             );
-            ec.connect_key_released(clone!(@weak widget => move |_, keyval, keycode, _state| {
-                let imp = Self::from_instance(&widget);
-                imp.key_released(keyval, keycode);
-            }));
+            ec.connect_key_released(
+                clone!(@weak self as this => move |_, keyval, keycode, _state| {
+                    this.key_released(keyval, keycode);
+                }),
+            );
 
             let ec = gtk::EventControllerMotion::new();
-            widget.add_controller(&ec);
-            ec.connect_motion(clone!(@weak widget => move |_, x, y| {
-                let imp = Self::from_instance(&widget);
-                if let Some((x, y)) = imp.transform_pos(x, y) {
-                    widget.emit_by_name::<()>("motion", &[&x, &y]);
+            self.obj().add_controller(&ec);
+            ec.connect_motion(clone!(@weak self as this => move |_, x, y| {
+                if let Some((x, y)) = this.transform_pos(x, y) {
+                    this.obj().emit_by_name::<()>("motion", &[&x, &y]);
                 }
             }));
-            ec.connect_enter(clone!(@weak widget => move |_, x, y| {
-                let imp = Self::from_instance(&widget);
-                if let Some((x, y)) = imp.transform_pos(x, y) {
-                    widget.emit_by_name::<()>("motion", &[&x, &y]);
+            ec.connect_enter(clone!(@weak self as this => move |_, x, y| {
+                if let Some((x, y)) = this.transform_pos(x, y) {
+                    this.obj().emit_by_name::<()>("motion", &[&x, &y]);
                 }
             }));
-            ec.connect_leave(clone!(@weak widget => move |_| {
-                let imp = Self::from_instance(&widget);
-                imp.ungrab_keyboard();
+            ec.connect_leave(clone!(@weak self as this => move |_| {
+                this.ungrab_keyboard();
             }));
 
             let ec = gtk::GestureClick::new();
             ec.set_button(0);
-            widget.add_controller(&ec);
+            self.obj().add_controller(&ec);
             ec.connect_pressed(
-                clone!(@weak widget => @default-panic, move |gesture, _n_press, x, y| {
-                    let imp = Self::from_instance(&widget);
-
-                    imp.try_grab();
+                clone!(@weak self as this => @default-panic, move |gesture, _n_press, x, y| {
+                    this.try_grab();
 
                     let button = gesture.current_button();
-                    if let Some((x, y)) = imp.transform_pos(x, y) {
-                        widget.emit_by_name::<()>("motion", &[&x, &y]);
+                    if let Some((x, y)) = this.transform_pos(x, y) {
+                        this.obj().emit_by_name::<()>("motion", &[&x, &y]);
                     }
-                    widget.emit_by_name::<()>("mouse-press", &[&button]);
+                    this.obj().emit_by_name::<()>("mouse-press", &[&button]);
                 }),
             );
-            ec.connect_released(clone!(@weak widget => move |gesture, _n_press, x, y| {
-                let imp = Self::from_instance(&widget);
-                let button = gesture.current_button();
-                if let Some((x, y)) = imp.transform_pos(x, y) {
-                    widget.emit_by_name::<()>("motion", &[&x, &y]);
-                }
-                widget.emit_by_name::<()>("mouse-release", &[&button]);
-            }));
+            ec.connect_released(
+                clone!(@weak self as this => move |gesture, _n_press, x, y| {
+                    let button = gesture.current_button();
+                    if let Some((x, y)) = this.transform_pos(x, y) {
+                        this.obj().emit_by_name::<()>("motion", &[&x, &y]);
+                    }
+                    this.obj().emit_by_name::<()>("mouse-release", &[&button]);
+                }),
+            );
 
             let ec = gtk::EventControllerScroll::new(
                 gtk::EventControllerScrollFlags::BOTH_AXES
                     | gtk::EventControllerScrollFlags::DISCRETE,
             );
-            widget.add_controller(&ec);
-            ec.connect_scroll(clone!(@weak widget => @default-panic, move |_, dx, dy| {
-                if dy >= 1.0 {
-                    widget.emit_by_name::<()>("scroll-discrete", &[&Scroll::Down]);
-                } else if dy <= -1.0 {
-                    widget.emit_by_name::<()>("scroll-discrete", &[&Scroll::Up]);
-                }
-                if dx >= 1.0 {
-                    widget.emit_by_name::<()>("scroll-discrete", &[&Scroll::Right]);
-                } else if dx <= -1.0 {
-                    widget.emit_by_name::<()>("scroll-discrete", &[&Scroll::Left]);
-                }
-                glib::signal::Inhibit(false)
-            }));
+            self.obj().add_controller(&ec);
+            ec.connect_scroll(
+                clone!(@weak self as this => @default-panic, move |_, dx, dy| {
+                    if dy >= 1.0 {
+                        this.obj().emit_by_name::<()>("scroll-discrete", &[&Scroll::Down]);
+                    } else if dy <= -1.0 {
+                        this.obj().emit_by_name::<()>("scroll-discrete", &[&Scroll::Up]);
+                    }
+                    if dx >= 1.0 {
+                        this.obj().emit_by_name::<()>("scroll-discrete", &[&Scroll::Right]);
+                    } else if dx <= -1.0 {
+                        this.obj().emit_by_name::<()>("scroll-discrete", &[&Scroll::Left]);
+                    }
+                    glib::signal::Inhibit(false)
+                }),
+            );
         }
 
-        fn measure(
-            &self,
-            _widget: &Self::Type,
-            orientation: gtk::Orientation,
-            _for_size: i32,
-        ) -> (i32, i32, i32, i32) {
+        fn measure(&self, orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
             let (minimum, mut natural, minimum_baseline, natural_baseline) = (128, 128, -1, -1);
 
             // TODO: doesn't work as expected yet
@@ -457,46 +425,45 @@ pub mod imp {
             (minimum, natural, minimum_baseline, natural_baseline)
         }
 
-        fn size_allocate(&self, widget: &Self::Type, width: i32, height: i32, baseline: i32) {
-            self.parent_size_allocate(widget, width, height, baseline);
+        fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+            self.parent_size_allocate(width, height, baseline);
             self.layout_manager
                 .get()
                 .unwrap()
-                .allocate(widget, width, height, baseline);
+                .allocate(&*self.obj(), width, height, baseline);
 
             if let Some(timeout_id) = self.resize_timeout_id.take() {
                 timeout_id.remove();
             }
             self.resize_timeout_id.set(Some(glib::timeout_add_local(
                 Duration::from_millis(500),
-                clone!(@weak widget => @default-return glib::Continue(false), move || {
-                    let imp = Self::from_instance(&widget);
-                    let sf = widget.scale_factor() as u32;
+                clone!(@weak self as this => @default-return glib::Continue(false), move || {
+                    let sf = this.obj().scale_factor() as u32;
                     let width = width as u32 * sf;
                     let height = height as u32 * sf;
-                    let mm = imp.surface()
+                    let mm = this.surface()
                                    .as_ref()
-                                   .and_then(|s| Some(gdk::traits::DisplayExt::monitor_at_surface(&widget.display(), s)))
+                                   .and_then(|s| Some(gdk::traits::DisplayExt::monitor_at_surface(&this.obj().display(), s)))
                                    .map(|m| {
                                        let (geom, wmm, hmm) = (m.geometry(), m.width_mm() as u32, m.height_mm() as u32);
                                        (wmm * width / (geom.width() as u32), hmm * height / geom.height() as u32)
                                    }).unwrap_or((0u32, 0u32));
-                    if Some((width, height, mm)) != imp.last_resize_request.get() {
-                        imp.last_resize_request.set(Some((width, height, mm)));
-                        widget.emit_by_name::<()>("resize-request", &[&width, &height, &mm.0, &mm.1]);
+                    if Some((width, height, mm)) != this.last_resize_request.get() {
+                        this.last_resize_request.set(Some((width, height, mm)));
+                        this.obj().emit_by_name::<()>("resize-request", &[&width, &height, &mm.0, &mm.1]);
                     }
-                    imp.resize_timeout_id.set(None);
+                    this.resize_timeout_id.set(None);
                     glib::Continue(false)
                 }),
             )));
         }
 
-        fn snapshot(&self, widget: &Self::Type, snapshot: &gtk::Snapshot) {
+        fn snapshot(&self, snapshot: &gtk::Snapshot) {
             snapshot.save();
-            self.parent_snapshot(widget, snapshot);
+            self.parent_snapshot(snapshot);
             snapshot.restore();
 
-            if widget.mouse_absolute() {
+            if self.obj().mouse_absolute() {
                 return;
             }
             if !self.grabbed.get().contains(Grab::MOUSE) {
@@ -507,7 +474,7 @@ pub mod imp {
                     if let Some(texture) = cursor.texture() {
                         // don't take hotspot as an offset (it's not for hw cursor)
                         if let Some((x, y)) = self.transform_pos_inv(pos.0 as _, pos.1 as _) {
-                            let sf = widget.scale_factor();
+                            let sf = self.obj().scale_factor();
 
                             snapshot.append_texture(
                                 &texture,
@@ -601,31 +568,40 @@ pub mod imp {
 
         #[cfg(unix)]
         fn realize_wl(&self, dpy: &gdk_wl::WaylandDisplay) {
-            let display = dpy.wl_display();
-            let mut event_queue = display.create_event_queue();
-            let attached_display = display.attach(event_queue.token());
-            let globals = GlobalManager::new(&attached_display);
-            event_queue
-                .sync_roundtrip(&mut (), |_, _, _| unreachable!())
-                .unwrap();
-            let rel_manager = globals
-                .instantiate_exact::<ZwpRelativePointerManagerV1>(1)
-                .unwrap();
+            use std::os::unix::io::AsRawFd;
+            use wayland_client::{backend::Backend, globals::registry_queue_init, Connection};
+
+            let wl_display =
+                unsafe { gdk_wl::ffi::gdk_wayland_display_get_wl_display(dpy.to_glib_none().0) };
+            let connection = Connection::from_backend(unsafe {
+                Backend::from_foreign_display(wl_display as *mut _)
+            });
+            let (globals, mut queue) = registry_queue_init::<crate::Display>(&connection).unwrap();
+
+            let rel_manager = globals.bind(&queue.handle(), 1..=1, ()).unwrap();
             self.wl_rel_manager.set(rel_manager).unwrap();
-            let pointer_constraints = globals
-                .instantiate_exact::<ZwpPointerConstraintsV1>(1)
-                .unwrap();
+            let pointer_constraints = globals.bind(&queue.handle(), 1..=1, ()).unwrap();
             self.wl_pointer_constraints
                 .set(pointer_constraints)
                 .unwrap();
-            let fd = display.get_connection_fd();
-            // I can't find a better way to hook it to gdk...
-            let source = glib::unix_fd_add_local(fd, glib::IOCondition::IN, move |_, _| {
-                event_queue
-                    .sync_roundtrip(&mut (), |_, _, _| unreachable!())
-                    .unwrap();
+
+            let fd = connection
+                .prepare_read()
+                .unwrap()
+                .connection_fd()
+                .as_raw_fd();
+            let source = glib::source::unix_fd_add_local(fd, glib::IOCondition::IN, move |_, _| {
+                connection.prepare_read().unwrap().read().unwrap();
                 glib::Continue(true)
             });
+
+            self.wl_queue.set(queue.handle()).unwrap();
+            glib::MainContext::default().spawn_local(
+                clone!(@weak self as this => @default-panic, async move {
+                    let mut obj = this.obj().clone();
+                    std::future::poll_fn(|cx| queue.poll_dispatch_pending(cx, &mut obj)).await.unwrap();
+                })
+            );
             self.wl_source.set(Some(source))
         }
 
@@ -854,8 +830,8 @@ pub mod imp {
                 Ok(device) => device,
                 _ => return false,
             };
-            let pointer = device.wl_pointer();
-            let obj = self.instance();
+            let pointer = device.wl_pointer().unwrap();
+            let handle = self.wl_queue.get().unwrap();
 
             if self.wl_lock_pointer.borrow().is_none() {
                 if let Some(constraints) = self.wl_pointer_constraints.get() {
@@ -864,28 +840,19 @@ pub mod imp {
                             &surf,
                             &pointer,
                             None,
-                            Lifetime::Persistent as _,
+                            zwp_pointer_constraints_v1::Lifetime::Persistent as _,
+                            handle,
+                            (),
                         );
-                        lock.quick_assign(move |_, event, _| {
-                            log::debug!("wl lock pointer event: {:?}", event);
-                        });
                         self.wl_lock_pointer.replace(Some(lock));
                     }
                 }
             }
 
             if self.wl_rel_pointer.borrow().is_none() {
+                let handle = self.wl_queue.get().unwrap();
                 if let Some(rel_manager) = self.wl_rel_manager.get() {
-                    let rel_pointer = rel_manager.get_relative_pointer(&pointer);
-                    rel_pointer.quick_assign(
-                        clone!(@weak obj => @default-panic, move |_, event, _| {
-                            if let RelEvent::RelativeMotion { dx_unaccel, dy_unaccel, .. } = event {
-                                let scale = obj.scale_factor() as f64;
-                                let (dx, dy) = (dx_unaccel / scale, dy_unaccel / scale);
-                                obj.emit_by_name::<()>("motion-relative", &[&dx, &dy]);
-                            }
-                        }),
-                    );
+                    let rel_pointer = rel_manager.get_relative_pointer(&pointer, handle, ());
                     self.wl_rel_pointer.replace(Some(rel_pointer));
                 }
             }
@@ -1039,7 +1006,7 @@ pub mod imp {
         fn wl_surface(&self) -> Option<wayland_client::protocol::wl_surface::WlSurface> {
             self.surface()
                 .and_then(|s| s.downcast::<gdk_wl::WaylandSurface>().ok())
-                .map(|w| w.wl_surface())
+                .map(|w| w.wl_surface().unwrap())
         }
 
         #[cfg(unix)]
@@ -1098,6 +1065,92 @@ impl Display {
             .unwrap();
         let tex = gdk::Texture::for_pixbuf(&pb);
         gdk::Cursor::from_texture(&tex, hot_x * scale, hot_y * scale, None)
+    }
+}
+
+#[cfg(not(feature = "bindings"))]
+#[cfg(unix)]
+impl wayland_client::Dispatch<wl_registry::WlRegistry, wayland_client::globals::GlobalListContents>
+    for Display
+{
+    fn event(
+        _state: &mut Self,
+        _: &wl_registry::WlRegistry,
+        event: wl_registry::Event,
+        _: &wayland_client::globals::GlobalListContents,
+        _: &wayland_client::Connection,
+        _: &wayland_client::QueueHandle<Self>,
+    ) {
+        log::trace!("{event:?}");
+    }
+}
+
+#[cfg(not(feature = "bindings"))]
+#[cfg(unix)]
+impl wayland_client::Dispatch<ZwpRelativePointerManagerV1, ()> for Display {
+    fn event(
+        _state: &mut Self,
+        _: &ZwpRelativePointerManagerV1,
+        event: wayland_protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_manager_v1::Event,
+        _: &(),
+        _: &wayland_client::Connection,
+        _: &wayland_client::QueueHandle<Self>,
+    ) {
+        log::trace!("{event:?}");
+    }
+}
+
+#[cfg(not(feature = "bindings"))]
+#[cfg(unix)]
+impl wayland_client::Dispatch<ZwpRelativePointerV1, ()> for Display {
+    fn event(
+        obj: &mut Self,
+        _: &ZwpRelativePointerV1,
+        event: wayland_protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_v1::Event,
+        _: &(),
+        _: &wayland_client::Connection,
+        _: &wayland_client::QueueHandle<Self>,
+    ) {
+        if let RelEvent::RelativeMotion {
+            dx_unaccel,
+            dy_unaccel,
+            ..
+        } = event
+        {
+            let scale = obj.scale_factor() as f64;
+            let (dx, dy) = (dx_unaccel / scale, dy_unaccel / scale);
+            obj.emit_by_name::<()>("motion-relative", &[&dx, &dy]);
+        }
+    }
+}
+
+#[cfg(not(feature = "bindings"))]
+#[cfg(unix)]
+impl wayland_client::Dispatch<ZwpPointerConstraintsV1, ()> for Display {
+    fn event(
+        _state: &mut Self,
+        _: &ZwpPointerConstraintsV1,
+        event: wayland_protocols::wp::pointer_constraints::zv1::client::zwp_pointer_constraints_v1::Event,
+        _: &(),
+        _: &wayland_client::Connection,
+        _: &wayland_client::QueueHandle<Self>,
+    ) {
+        log::trace!("{event:?}");
+    }
+}
+
+#[cfg(not(feature = "bindings"))]
+#[cfg(unix)]
+impl wayland_client::Dispatch<ZwpLockedPointerV1, ()> for Display {
+    fn event(
+        _state: &mut Self,
+        _: &ZwpLockedPointerV1,
+        event: wayland_protocols::wp::pointer_constraints::zv1::client::zwp_locked_pointer_v1::Event,
+        _: &(),
+        _: &wayland_client::Connection,
+        _: &wayland_client::QueueHandle<Self>,
+    ) {
+        log::trace!("{event:?}");
     }
 }
 

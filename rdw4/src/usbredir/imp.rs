@@ -152,7 +152,7 @@ impl ObjectSubclass for UsbRedir {
 }
 
 impl ObjectImpl for UsbRedir {
-    fn constructed(&self, _obj: &Self::Type) {}
+    fn constructed(&self) {}
 
     fn properties() -> &'static [ParamSpec] {
         static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
@@ -169,14 +169,14 @@ impl ObjectImpl for UsbRedir {
         PROPERTIES.as_ref()
     }
 
-    fn property(&self, _obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+    fn property(&self, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
         match pspec.name() {
             "free-channels" => self.free_channels.get().to_value(),
             _ => unimplemented!(),
         }
     }
 
-    fn set_property(&self, _tag: &Self::Type, _id: usize, value: &glib::Value, pspec: &ParamSpec) {
+    fn set_property(&self, _id: usize, value: &glib::Value, pspec: &ParamSpec) {
         match pspec.name() {
             "free-channels" => {
                 let n = value.get().unwrap();
@@ -191,59 +191,50 @@ impl ObjectImpl for UsbRedir {
     fn signals() -> &'static [Signal] {
         static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
             vec![
-                Signal::builder(
-                    "device-state-set",
-                    &[
-                        device::Device::static_type().into(),
-                        bool::static_type().into(),
-                    ],
-                    <()>::static_type().into(),
-                )
-                .build(),
-                Signal::builder(
-                    "show-error",
-                    &[String::static_type().into()],
+                Signal::builder("device-state-set")
+                    .param_types([device::Device::static_type(), bool::static_type()])
+                    .build(),
+                Signal::builder("show-error")
+                    .param_types([String::static_type()])
                     // TODO: <glib::signal::Inhibit>::static_type().into(),
-                    bool::static_type().into(),
-                )
-                .class_handler(|_token, args| {
-                    let inst = args[0].get::<super::UsbRedir>().unwrap();
-                    let imp = UsbRedir::from_instance(&inst);
-                    let msg: String = args[1].get().unwrap();
-                    imp.error_label.set_label(&msg);
-                    imp.infobar.set_revealed(true);
-                    Some(true.to_value())
-                })
-                .accumulator(|_hint, ret, value| {
-                    let handled: bool = value.get().unwrap_or_default();
-                    *ret = value.clone();
-                    !handled
-                })
-                .build(),
+                    .return_type_from(bool::static_type())
+                    .class_handler(|_token, args| {
+                        let inst = args[0].get::<super::UsbRedir>().unwrap();
+                        let imp = UsbRedir::from_instance(&inst);
+                        let msg: String = args[1].get().unwrap();
+                        imp.error_label.set_label(&msg);
+                        imp.infobar.set_revealed(true);
+                        Some(true.to_value())
+                    })
+                    .accumulator(|_hint, ret, value| {
+                        let handled: bool = value.get().unwrap_or_default();
+                        *ret = value.clone();
+                        !handled
+                    })
+                    .build(),
             ]
         });
         SIGNALS.as_ref()
     }
 
-    fn dispose(&self, obj: &Self::Type) {
-        while let Some(child) = obj.first_child() {
+    fn dispose(&self) {
+        while let Some(child) = self.obj().first_child() {
             child.unparent();
         }
     }
 }
 
 impl WidgetImpl for UsbRedir {
-    fn realize(&self, widget: &Self::Type) {
-        self.parent_realize(widget);
+    fn realize(&self) {
+        self.parent_realize();
 
         if let Some((ctxt, rx)) = RdwUsbContext::new() {
             let _id = rx.attach(
                 None,
-                clone!(@weak widget as this => @default-return glib::Continue(false), move |ev| {
-                    let imp = Self::from_instance(&this);
+                clone!(@weak self as this => @default-return glib::Continue(false), move |ev| {
                     match ev {
-                        RdwUsbEvent::DeviceArrived(d) => imp.add_device(d),
-                        RdwUsbEvent::DeviceLeft(d) => imp.remove_device(d),
+                        RdwUsbEvent::DeviceArrived(d) => this.add_device(d),
+                        RdwUsbEvent::DeviceLeft(d) => this.remove_device(d),
                     }
                     glib::Continue(true)
                 }),
@@ -252,14 +243,14 @@ impl WidgetImpl for UsbRedir {
         }
 
         self.listbox
-            .connect_row_activated(clone!(@weak widget as this => move |_, row| {
+            .connect_row_activated(clone!(@weak self as this => move |_, row| {
                 let row: row::Row = row.first_child().unwrap().downcast().unwrap();
                 row.switch().activate();
             }));
 
         self.listbox.bind_model(
             Some(&self.model),
-            clone!(@weak widget as this => @default-panic, move |item| {
+            clone!(@weak self as this => @default-panic, move |item| {
                 let row = row::Row::new(item.downcast_ref().unwrap());
                 row.upcast()
             }),

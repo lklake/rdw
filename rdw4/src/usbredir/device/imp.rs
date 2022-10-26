@@ -42,7 +42,7 @@ impl ObjectImpl for Device {
         PROPERTIES.as_ref()
     }
 
-    fn property(&self, _obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+    fn property(&self, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
         match pspec.name() {
             "name" => self.name.borrow().to_value(),
             "active" => self.active.get().to_value(),
@@ -50,7 +50,7 @@ impl ObjectImpl for Device {
         }
     }
 
-    fn set_property(&self, _tag: &Self::Type, _id: usize, value: &glib::Value, pspec: &ParamSpec) {
+    fn set_property(&self, _id: usize, value: &glib::Value, pspec: &ParamSpec) {
         match pspec.name() {
             "name" => {
                 self.name.replace(value.get().unwrap());
@@ -64,12 +64,9 @@ impl ObjectImpl for Device {
 
     fn signals() -> &'static [Signal] {
         static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
-            vec![Signal::builder(
-                "state-set",
-                &[bool::static_type().into()],
-                <()>::static_type().into(),
-            )
-            .build()]
+            vec![Signal::builder("state-set")
+                .param_types([bool::static_type()])
+                .build()]
         });
         SIGNALS.as_ref()
     }

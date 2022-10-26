@@ -18,7 +18,7 @@ glib::wrapper! {
 // TODO: make a base class, and derive it for libusb/emulated etc
 impl Device {
     pub fn new() -> Self {
-        Object::new(&[]).expect("Failed to create `Device`")
+        Object::new::<Self>(&[])
     }
 
     pub fn device(&self) -> Option<rusb::Device<rusb::Context>> {

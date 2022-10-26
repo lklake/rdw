@@ -20,7 +20,7 @@ glib::wrapper! {
 
 impl UsbRedir {
     pub fn new() -> Self {
-        glib::Object::new::<Self>(&[]).unwrap()
+        glib::Object::new::<Self>(&[])
     }
 
     pub fn model(&self) -> &gio::ListStore {
