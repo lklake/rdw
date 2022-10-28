@@ -73,7 +73,7 @@ pub mod imp {
 
         // The remote display size, ex: 1024x768
         pub(crate) display_size: Cell<Option<(usize, usize)>>,
-        pub(crate) last_resize_request: Cell<Option<(u32, u32, (u32, u32))>>,
+        pub(crate) last_resize_request: Cell<Option<(u32, u32, u32, u32)>>,
         pub(crate) resize_timeout_id: Cell<Option<SourceId>>,
         // The currently defined cursor
         pub(crate) cursor: RefCell<Option<gdk::Cursor>>,
@@ -149,7 +149,7 @@ pub mod imp {
                         .map(|symbol| *symbol)
                         .unwrap_or(std::ptr::null())
                 });
-                gl::load_with(|s| epoxy::get_proc_addr(s));
+                gl::load_with(epoxy::get_proc_addr);
             }
         }
     }
@@ -441,16 +441,16 @@ pub mod imp {
                     let sf = this.obj().scale_factor() as u32;
                     let width = width as u32 * sf;
                     let height = height as u32 * sf;
-                    let mm = this.surface()
+                    let (w_mm, h_mm) = this.surface()
                                    .as_ref()
-                                   .and_then(|s| Some(gdk::traits::DisplayExt::monitor_at_surface(&this.obj().display(), s)))
+                                   .map(|s| gdk::traits::DisplayExt::monitor_at_surface(&this.obj().display(), s))
                                    .map(|m| {
                                        let (geom, wmm, hmm) = (m.geometry(), m.width_mm() as u32, m.height_mm() as u32);
                                        (wmm * width / (geom.width() as u32), hmm * height / geom.height() as u32)
                                    }).unwrap_or((0u32, 0u32));
-                    if Some((width, height, mm)) != this.last_resize_request.get() {
-                        this.last_resize_request.set(Some((width, height, mm)));
-                        this.obj().emit_by_name::<()>("resize-request", &[&width, &height, &mm.0, &mm.1]);
+                    if Some((width, height, w_mm, h_mm)) != this.last_resize_request.get() {
+                        this.last_resize_request.set(Some((width, height, w_mm, h_mm)));
+                        this.obj().emit_by_name::<()>("resize-request", &[&width, &height, &w_mm, &h_mm]);
                     }
                     this.resize_timeout_id.set(None);
                     glib::Continue(false)
@@ -1500,7 +1500,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         {
             let f = &*(f as *const F);
             f(
-                &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
+                Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
                 keyval,
                 keycode,
                 event,
@@ -1527,11 +1527,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
             P: IsA<Display>,
         {
             let f = &*(f as *const F);
-            f(
-                &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
-                x,
-                y,
-            )
+            f(Display::from_glib_borrow(this).unsafe_cast_ref::<P>(), x, y)
         }
         unsafe {
             let f: Box<F> = Box::new(f);
@@ -1555,7 +1551,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         {
             let f = &*(f as *const F);
             f(
-                &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
+                Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
                 dx,
                 dy,
             )
@@ -1581,7 +1577,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         {
             let f = &*(f as *const F);
             f(
-                &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
+                Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
                 button,
             )
         }
@@ -1606,7 +1602,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         {
             let f = &*(f as *const F);
             f(
-                &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
+                Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
                 button,
             )
         }
@@ -1631,7 +1627,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         {
             let f = &*(f as *const F);
             f(
-                &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
+                Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
                 scroll,
             )
         }
@@ -1685,7 +1681,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         {
             let f = &*(f as *const F);
             f(
-                &*Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
+                Display::from_glib_borrow(this).unsafe_cast_ref::<P>(),
                 width,
                 height,
                 width_mm,
