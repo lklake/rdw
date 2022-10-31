@@ -1,5 +1,5 @@
 include:
-  - remote: 'https://gitlab.freedesktop.org/freedesktop/ci-templates/-/raw/34f4ade9/templates/fedora.yml'
+  - remote: 'https://gitlab.freedesktop.org/freedesktop/ci-templates/-/raw/ed640900/templates/fedora.yml'
 
 stages:
   - container
@@ -9,15 +9,15 @@ variables:
   FDO_UPSTREAM_REPO: malureau/rdw
   GIT_SUBMODULE_STRATEGY: recursive
 
-.rdw.fedora:35:
+.rdw.fedora:36:
   variables:
-    FDO_DISTRIBUTION_VERSION: 35
-    FDO_DISTRIBUTION_TAG: '2021-12-12.0'
+    FDO_DISTRIBUTION_VERSION: 36
+    FDO_DISTRIBUTION_TAG: '2022-10-31.0'
 
 build-fedora-container:
   extends:
   - .fdo.container-build@fedora@x86_64
-  - .rdw.fedora:35
+  - .rdw.fedora:36
   stage: container
   variables:
     FDO_DISTRIBUTION_PACKAGES: >-
@@ -40,7 +40,7 @@ build-fedora-container:
 test-build:
   extends:
     - .fdo.distribution-image@fedora
-    - .rdw.fedora:35
+    - .rdw.fedora:36
   stage: test
   script:
     - pushd rdw4
