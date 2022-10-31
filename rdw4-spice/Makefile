@@ -1,3 +1,4 @@
+MACHINE := $(shell uname -i)
 ifeq ($(MACHINE), x86_64)
 LIB = lib64
 else
