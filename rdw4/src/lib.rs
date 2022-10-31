@@ -15,6 +15,8 @@ mod egl;
 mod error;
 mod gstaudio;
 mod usbredir;
+#[cfg(windows)]
+mod win32;
 
 #[cfg(not(feature = "bindings"))]
 mod util;

@@ -17,9 +17,15 @@ use wayland_protocols::wp::{
     },
 };
 
+#[cfg(all(windows, not(feature = "bindings")))]
+use gdk_win32::windows;
+
 #[cfg(unix)]
 use crate::RdwDmabufScanout;
 use crate::{Grab, KeyEvent, Scroll};
+
+#[cfg(windows)]
+use crate::win32;
 
 #[cfg(all(unix, not(feature = "bindings")))]
 use crate::egl;
@@ -117,6 +123,11 @@ pub mod imp {
         pub(crate) wl_pointer_constraints: OnceCell<ZwpPointerConstraintsV1>,
         #[cfg(unix)]
         pub(crate) wl_lock_pointer: RefCell<Option<ZwpLockedPointerV1>>,
+
+        #[cfg(windows)]
+        pub(crate) win_mouse: Cell<[isize; 3]>,
+        #[cfg(windows)]
+        pub(crate) win_mouse_speed: Cell<isize>,
     }
 
     #[glib::object_subclass]
@@ -695,6 +706,13 @@ pub mod imp {
                 if let Some(rel_pointer) = self.wl_rel_pointer.take() {
                     rel_pointer.destroy();
                 }
+                #[cfg(windows)]
+                unsafe {
+                    windows::Win32::UI::WindowsAndMessaging::ClipCursor(None)
+                };
+
+                self.restore_accel_mouse();
+
                 self.grabbed.set(self.grabbed.get() - Grab::MOUSE);
                 if !display.mouse_absolute() {
                     self.gl_area().set_cursor(None);
@@ -860,7 +878,49 @@ pub mod imp {
             true
         }
 
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        fn try_grab_device(&self, _device: gdk::Device) -> bool {
+            use windows::Win32::Graphics::Gdi::{
+                GetMonitorInfoA, IntersectRect, MonitorFromRect, MONITORINFO,
+                MONITOR_DEFAULTTONEAREST,
+            };
+            use windows::Win32::UI::WindowsAndMessaging::{ClipCursor, GetWindowRect};
+
+            let h = self.win32_handle();
+            let mut win_rect = unsafe { std::mem::zeroed() };
+            if let Err(e) = unsafe { GetWindowRect(h, &mut win_rect).ok() } {
+                log::warn!("Failed to GetWindowRect: {e}");
+                return false;
+            }
+
+            let h = unsafe { MonitorFromRect(&win_rect, MONITOR_DEFAULTTONEAREST) };
+            if h.is_invalid() {
+                log::warn!("Failed to MonitorFromRect");
+                return false;
+            }
+
+            let mut info: MONITORINFO = unsafe { std::mem::zeroed() };
+            info.cbSize = std::mem::size_of_val(&info) as _;
+            if let Err(e) = unsafe { GetMonitorInfoA(h, &mut info).ok() } {
+                log::warn!("Failed to GetMonitorInfoA: {e}");
+                return false;
+            }
+
+            let mut rect = unsafe { std::mem::zeroed() };
+            if let Err(e) = unsafe { IntersectRect(&mut rect, &win_rect, &info.rcWork).ok() } {
+                log::warn!("Failed to IntersectRect: {e}");
+                return false;
+            }
+
+            if let Err(e) = unsafe { ClipCursor(Some(&rect)).ok() } {
+                log::warn!("Failed to ClipCursor: {e}");
+                return false;
+            }
+
+            true
+        }
+
+        #[cfg(not(any(unix, windows)))]
         fn try_grab_device(&self, _device: gdk::Device) -> bool {
             false
         }
@@ -877,11 +937,57 @@ pub mod imp {
 
             if let Some(default_seat) = gdk::traits::DisplayExt::default_seat(&obj.display()) {
                 for device in default_seat.devices(gdk::SeatCapabilities::POINTER) {
-                    self.try_grab_device(device);
+                    if !self.try_grab_device(device) {
+                        return false;
+                    }
                 }
             }
 
+            self.save_accel_mouse();
+
             true
+        }
+
+        fn save_accel_mouse(&self) {
+            #[cfg(windows)]
+            {
+                match win32::spi_get_mouse() {
+                    Ok(mouse) => self.win_mouse.set(mouse),
+                    Err(e) => log::warn!("Failed to spi_get_mouse: {e}"),
+                }
+                match win32::spi_get_mouse_speed() {
+                    Ok(speed) => self.win_mouse_speed.set(speed),
+                    Err(e) => log::warn!("Failed to spi_get_mouse: {e}"),
+                }
+
+                let mouse: [isize; 3] = Default::default();
+                if let Err(e) = win32::spi_set_mouse(mouse) {
+                    log::warn!("Failed to spi_set_mouse: {e}");
+                }
+                if let Err(e) = win32::spi_set_mouse_speed(10) {
+                    log::warn!("Failed to spi_set_mouse_speed: {e}");
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                // todo
+            }
+        }
+
+        fn restore_accel_mouse(&self) {
+            #[cfg(windows)]
+            {
+                if let Err(e) = win32::spi_set_mouse(self.win_mouse.get()) {
+                    log::warn!("Failed to spi_set_mouse: {e}");
+                }
+                if let Err(e) = win32::spi_set_mouse_speed(self.win_mouse_speed.get()) {
+                    log::warn!("Failed to spi_set_mouse_speed: {e}");
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                // todo
+            }
         }
 
         fn try_grab(&self) {
@@ -995,6 +1101,13 @@ pub mod imp {
         fn surface(&self) -> Option<gdk::Surface> {
             let display = self.instance();
             display.native().map(|n| n.surface())
+        }
+
+        #[cfg(windows)]
+        fn win32_handle(&self) -> Option<gdk_win32::HWND> {
+            self.surface()
+                .and_then(|s| s.downcast::<gdk_win32::Win32Surface>().ok())
+                .map(|w| w.handle())
         }
 
         #[cfg(unix)]
