@@ -8,7 +8,7 @@ edition = "2018"
 
 [dependencies]
 log = "0.4"
-env_logger = { version = "0.7", default-features = false }
+env_logger = { version = "0.9", default-features = false }
 rdw = { package = "rdw4", path = "../rdw4", features = ["bindings"] }
 rdw-rdp = { package = "rdw4-rdp", path = "../rdw4-rdp" }
 rdw-spice = { package = "rdw4-spice", path = "../rdw4-spice" }
