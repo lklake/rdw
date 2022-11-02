@@ -18,7 +18,7 @@ fn main() {
         let name = &meta.root_package().unwrap().metadata["capi"]["header"]["name"]
             .as_str()
             .unwrap();
-        let name_up = name.replace("-", "_").to_uppercase();
+        let name_up = name.replace('-', "_").to_uppercase();
         let out = std::env::var("OUT_DIR").unwrap();
         let out = Path::new(&out);
         let out_include = out.join("capi/include/");

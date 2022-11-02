@@ -655,7 +655,7 @@ impl Display {
             P: IsA<Display>,
         {
             let f = &*(f as *const F);
-            f(&*Display::from_glib_borrow(this).unsafe_cast_ref::<P>())
+            f(Display::from_glib_borrow(this).unsafe_cast_ref::<P>())
         }
         unsafe {
             let f: Box<F> = Box::new(f);

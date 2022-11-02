@@ -92,6 +92,7 @@ mod imp {
 
         fn set_property(&self, _id: usize, _value: &glib::Value, pspec: &glib::ParamSpec) {
             match pspec.name() {
+                "connection" => panic!(),
                 _ => unimplemented!(),
             }
         }

@@ -17,9 +17,6 @@ use wayland_protocols::wp::{
     },
 };
 
-#[cfg(all(windows, not(feature = "bindings")))]
-use gdk_win32::windows;
-
 #[cfg(unix)]
 use crate::RdwDmabufScanout;
 use crate::{Grab, KeyEvent, Scroll};
@@ -867,7 +864,10 @@ pub mod imp {
             };
             use windows::Win32::UI::WindowsAndMessaging::{ClipCursor, GetWindowRect};
 
-            let h = self.win32_handle();
+            let h = match self.win32_handle() {
+                Some(h) => h,
+                None => return false,
+            };
             let mut win_rect = unsafe { std::mem::zeroed() };
             if let Err(e) = unsafe { GetWindowRect(h, &mut win_rect).ok() } {
                 log::warn!("Failed to GetWindowRect: {e}");

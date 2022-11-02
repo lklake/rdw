@@ -1,6 +1,5 @@
 #[cfg(not(feature = "bindings"))]
 mod imp {
-    use super::*;
     use windows::core::Result;
     use windows::Win32::UI::WindowsAndMessaging::{
         SystemParametersInfoA, SPI_GETMOUSE, SPI_GETMOUSESPEED, SPI_SETMOUSE, SPI_SETMOUSESPEED,

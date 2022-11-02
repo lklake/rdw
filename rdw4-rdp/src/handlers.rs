@@ -227,7 +227,7 @@ impl CliprdrHandler for RdpClipHandler {
     ) -> Result<()> {
         let formats: Vec<_> = formats
             .iter()
-            .filter_map(|f| f.id.map(mime_from_format).flatten())
+            .filter_map(|f| f.id.and_then(mime_from_format))
             .collect();
         self.context.send_clipboard_set_content(formats)?;
         context.send_client_format_list_response(true)
@@ -272,8 +272,9 @@ impl RdpContextHandler {
     }
 
     fn send(&mut self, event: RdpEvent) -> Result<()> {
+        // the lock should provide ordering guarantee, but we should remove it...
         let mut inner = self.inner.lock().unwrap();
-        block_on(async { inner.tx.feed(event).await })
+        block_on(async move { inner.tx.send(event).await })
             .map_err(|e| RdpError::Failed(format!("{}", e)))?;
         Ok(())
     }
