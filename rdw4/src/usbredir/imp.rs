@@ -200,7 +200,7 @@ impl ObjectImpl for UsbRedir {
                     .return_type_from(bool::static_type())
                     .class_handler(|_token, args| {
                         let inst = args[0].get::<super::UsbRedir>().unwrap();
-                        let imp = UsbRedir::from_instance(&inst);
+                        let imp = UsbRedir::from_obj(&inst);
                         let msg: String = args[1].get().unwrap();
                         imp.error_label.set_label(&msg);
                         imp.infobar.set_revealed(true);
@@ -291,10 +291,9 @@ impl UsbRedir {
             return;
         }
 
-        let this = self.instance();
         let item = Device::new();
-        item.connect_state_set(clone!(@weak this => move |device, state| {
-            this.emit_by_name::<()>("device-state-set", &[device, &state]);
+        item.connect_state_set(clone!(@weak self as this => move |device, state| {
+            this.obj().emit_by_name::<()>("device-state-set", &[device, &state]);
         }));
         item.set_device(d);
         self.model.append(&item);

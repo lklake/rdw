@@ -281,7 +281,7 @@ mod imp {
                     glib::idle_add_local(
                         glib::clone!(@weak obj => @default-return Continue(false), move || {
                             let res = obj.emit_by_name::<bool>("rdp-authenticate", &[]);
-                            let imp = imp::Display::from_instance(&obj);
+                            let imp = imp::Display::from_obj(&obj);
                             match imp.state.take().unwrap() {
                                 RdpEvent::Authenticate { settings, tx } => {
                                     let _ = tx.send(if res {
@@ -368,7 +368,7 @@ mod imp {
                             Some(Box::pin(clone!(@weak obj, @strong stream => @default-return panic!(), async move {
                                 use futures::stream::StreamExt;
 
-                                let imp = Self::from_instance(&obj);
+                                let imp = Self::from_obj(&obj);
                                 if imp.clipboard.tx.borrow().is_some() {
                                     return Err(glib::Error::new(gio::IOErrorEnum::Failed, "clipboard request pending"));
                                 }
@@ -390,7 +390,7 @@ mod imp {
                 }
                 RdpEvent::ClipboardDataRequest { format } => {
                     glib::MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
-                        let imp = Self::from_instance(&obj);
+                        let imp = Self::from_obj(&obj);
                         let mut data = None;
 
                         if let Some(mime) = mime_from_format(format) {
@@ -426,7 +426,7 @@ mod imp {
                 .ok_or_else(|| RdpError::Failed("already started".into()))?;
 
             MainContext::default().spawn_local(clone!(@weak obj => async move {
-                let imp = imp::Display::from_instance(&obj);
+                let imp = imp::Display::from_obj(&obj);
 
                 while let Some(e) = rx.next().await {
                     imp.dispatch_rdp_event(&obj, e);
@@ -538,7 +538,7 @@ mod imp {
         rx: Receiver<Event>,
         notifier: Notifier,
     ) -> Result<()> {
-        let notifier_handle = notifier.handle();
+        let notifier_handle = notifier.handle()?;
         loop {
             let handles = {
                 let mut ctxt = context.lock().unwrap();
@@ -632,13 +632,13 @@ impl Display {
         &self,
         f: impl FnOnce(&mut freerdp::Settings) -> Result<()>,
     ) -> Result<()> {
-        let imp = imp::Display::from_instance(self);
+        let imp = imp::Display::from_obj(self);
 
         imp.with_settings(f)
     }
 
     pub fn rdp_connect(&mut self) -> Result<()> {
-        let imp = imp::Display::from_instance(self);
+        let imp = imp::Display::from_obj(self);
 
         imp.connect(self)
     }

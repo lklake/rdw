@@ -74,7 +74,7 @@ impl ObjectImpl for Device {
 
 impl Device {
     pub fn set_name(&self, name: &str) {
-        self.instance().set_property("name", name)
+        self.obj().set_property("name", name)
     }
 
     pub fn set_device(&self, device: rusb::Device<rusb::Context>) {

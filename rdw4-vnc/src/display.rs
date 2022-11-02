@@ -298,7 +298,7 @@ mod imp {
         }
 
         fn button_event(&self, press: bool, button: u8) {
-            let obj = self.instance();
+            let obj = self.obj();
             let (x, y) = if obj.mouse_absolute() {
                 self.last_motion
                     .get()
@@ -433,7 +433,7 @@ impl Display {
     }
 
     pub fn connection(&self) -> &gvnc::Connection {
-        let imp = imp::Display::from_instance(self);
+        let imp = imp::Display::from_obj(self);
 
         &imp.connection
     }

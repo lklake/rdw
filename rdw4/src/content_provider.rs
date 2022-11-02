@@ -99,8 +99,8 @@ impl ContentProvider {
         mime_types: &[&str],
         write_future: F,
     ) -> Self {
-        let inst = glib::Object::new::<Self>(&[]);
-        let imp = imp::ContentProvider::from_instance(&inst);
+        let obj = glib::Object::new::<Self>(&[]);
+        let imp = imp::ContentProvider::from_obj(&obj);
 
         let mut formats = gdk::ContentFormatsBuilder::new();
         for m in mime_types {
@@ -108,6 +108,6 @@ impl ContentProvider {
         }
         imp.formats.set(formats.build()).unwrap();
         assert!(imp.write_future.set(Box::new(write_future)).is_ok());
-        inst
+        obj
     }
 }

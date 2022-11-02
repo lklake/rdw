@@ -6,6 +6,7 @@ use keycodemap::KEYMAP_XORGEVDEV2XTKBD;
 use rdw::{gtk, DisplayExt};
 use spice::prelude::*;
 use spice_client_glib as spice;
+#[cfg(unix)]
 use std::os::unix::io::IntoRawFd;
 
 mod imp {
@@ -333,6 +334,7 @@ mod imp {
                             let scanout = dpy.gl_scanout();
                             log::debug!("notify::gl-scanout: {:?}", scanout);
 
+                            #[cfg(unix)]
                             if let Some(scanout) = scanout {
                                 this.obj().set_dmabuf_scanout(rdw::RdwDmabufScanout {
                                     width: scanout.width(),
@@ -437,13 +439,10 @@ mod imp {
 
     impl Display {
         fn add_clipboard_watch(&self, selection: u32) {
-            let obj = self.instance();
-
             let clipboard = self.clipboard_from_selection(selection).unwrap();
-            let watch_id = clipboard.connect_changed(clone!(@weak obj => move |clipboard| {
-                let imp = Self::from_instance(&obj);
+            let watch_id = clipboard.connect_changed(clone!(@weak self as this => move |clipboard| {
                 let is_local = clipboard.is_local();
-                if let (false, Some(main), formats) = (is_local, imp.main.upgrade(), clipboard.formats()) {
+                if let (false, Some(main), formats) = (is_local, this.main.upgrade(), clipboard.formats()) {
                     let mut types = formats.mime_types()
                                            .iter()
                                            .filter_map(|m| util::format_from_mime(m))
@@ -549,8 +548,6 @@ mod imp {
         }
 
         fn invalidate(&self, x: usize, y: usize, w: usize, h: usize) {
-            let obj = self.instance();
-
             let (monitor_x, monitor_y, _w, _h) = match self.monitor_config.get() {
                 Some(config) => config.geometry(),
                 _ => return,
@@ -580,7 +577,7 @@ mod imp {
                     let start = x * 4 + y * stride;
                     let end = (x + w) * 4 + (y + h - 1) * stride;
 
-                    obj.update_area(
+                    self.obj().update_area(
                         x as _,
                         y as _,
                         w as _,
@@ -607,7 +604,7 @@ impl Display {
     }
 
     pub fn session(&self) -> &spice::Session {
-        let imp = imp::Display::from_instance(self);
+        let imp = imp::Display::from_obj(self);
 
         &imp.session
     }

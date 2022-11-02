@@ -17,10 +17,17 @@ log = "0.4"
 once_cell = "1.5"
 derivative = "2.2.0"
 rdw = { package = "rdw4", path = "../rdw4", features = ["bindings"] }
-freerdp = { package = "freerdp2", version = "0.1" }
+freerdp = { package = "freerdp2", version = "0.2" }
 keycodemap = { package = "rdw-keycodemap", path = "../keycodemap", version = "0.1" }
 nix = "0.23.0"
 futures = { version = "0.3.17", features = ["executor"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.41.0", features = [
+  "Win32_System_Threading",
+  "Win32_Foundation",
+  "Win32_Security",
+]}
 
 [package.metadata.capi.library]
 name = "rdw4-rdp"

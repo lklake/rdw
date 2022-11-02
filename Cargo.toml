@@ -13,11 +13,3 @@ exclude = [
 ]
 
 default-members = ["demo"]
-
-[patch.crates-io]
-gvnc = { git = 'https://gitlab.gnome.org/malureau/gtk-vnc-rs.git' }
-spice-client-glib = { git = 'https://gitlab.gnome.org/malureau/spice-gtk-rs.git' }
-gtk4 = { git = 'https://github.com/elmarco/gtk4-rs.git', branch = "win32" }
-gdk4-wayland = { git = 'https://github.com/elmarco/gtk4-rs.git', branch = "win32" }
-gdk4-x11 = { git = 'https://github.com/elmarco/gtk4-rs.git', branch = "win32" }
-gdk4-win32 = { git = 'https://github.com/elmarco/gtk4-rs.git', branch = "win32" }

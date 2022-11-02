@@ -24,9 +24,6 @@ use gdk_win32::windows;
 use crate::RdwDmabufScanout;
 use crate::{Grab, KeyEvent, Scroll};
 
-#[cfg(windows)]
-use crate::win32;
-
 #[cfg(all(unix, not(feature = "bindings")))]
 use crate::egl;
 
@@ -53,6 +50,8 @@ pub mod imp {
     use super::*;
     use crate::error::Error;
     use crate::util;
+    #[cfg(windows)]
+    use crate::win32;
     use gl::types::*;
     use glib::{clone, subclass::Signal, SourceId};
     use gtk::{graphene, subclass::prelude::*};
@@ -673,30 +672,22 @@ pub mod imp {
         }
 
         fn ungrab_keyboard(&self) {
-            let display = self.instance();
-
             if !self.grabbed.get().contains(Grab::KEYBOARD) {
                 return;
             }
 
-            glib::idle_add_local(clone!(@strong display => @default-panic, move || {
-                let imp = Self::from_instance(&display);
-                if let Some(ec) = imp.grab_ec.upgrade() {
-                    ec.widget().remove_controller(&ec);
-                    imp.grab_ec.set(None);
-                }
-                if let Some(toplevel) = imp.toplevel() {
-                    toplevel.restore_system_shortcuts();
-                    imp.grabbed.set(imp.grabbed.get() - Grab::KEYBOARD);
-                    display.notify("grabbed");
-                }
-                glib::Continue(false)
-            }));
+            if let Some(ec) = self.grab_ec.upgrade() {
+                ec.widget().remove_controller(&ec);
+                self.grab_ec.set(None);
+            }
+            if let Some(toplevel) = self.toplevel() {
+                toplevel.restore_system_shortcuts();
+                self.grabbed.set(self.grabbed.get() - Grab::KEYBOARD);
+                self.obj().notify("grabbed");
+            }
         }
 
         pub(crate) fn ungrab_mouse(&self) {
-            let display = self.instance();
-
             if self.grabbed.get().contains(Grab::MOUSE) {
                 #[cfg(unix)]
                 if let Some(lock) = self.wl_lock_pointer.take() {
@@ -714,19 +705,18 @@ pub mod imp {
                 self.restore_accel_mouse();
 
                 self.grabbed.set(self.grabbed.get() - Grab::MOUSE);
-                if !display.mouse_absolute() {
+                if !self.obj().mouse_absolute() {
                     self.gl_area().set_cursor(None);
                 }
-                display.queue_draw(); // update cursor
-                display.notify("grabbed");
+                self.obj().queue_draw(); // update cursor
+                self.obj().notify("grabbed");
             }
         }
 
         fn emit_last_key_press(&self) {
-            let display = self.instance();
-
             if let Some((keyval, keycode)) = self.last_key_press.take() {
-                display.emit_by_name::<()>("key-event", &[&keyval, &keycode, &KeyEvent::PRESS]);
+                self.obj()
+                    .emit_by_name::<()>("key-event", &[&keyval, &keycode, &KeyEvent::PRESS]);
             }
 
             if let Some(timeout_id) = self.last_key_press_timeout.take() {
@@ -735,8 +725,6 @@ pub mod imp {
         }
 
         fn key_pressed(&self, ec: &gtk::EventControllerKey, keyval: gdk::Key, keycode: u32) {
-            let display = self.instance();
-
             if let Some(ref e) = ec.current_event() {
                 if self.grab_shortcut.get().unwrap().trigger(e, false) == gdk::KeyMatch::Exact {
                     if self.grabbed.get().is_empty() {
@@ -757,17 +745,14 @@ pub mod imp {
             self.last_key_press_timeout
                 .set(Some(glib::timeout_add_local(
                     Duration::from_millis(self.synthesize_delay.get() as _),
-                    glib::clone!(@weak display => @default-return glib::Continue(false), move || {
-                        let imp = Self::from_instance(&display);
-                        imp.emit_last_key_press();
+                    glib::clone!(@weak self as this => @default-return glib::Continue(false), move || {
+                        this.emit_last_key_press();
                         glib::Continue(false)
                     }),
                 )));
         }
 
         fn key_released(&self, keyval: gdk::Key, keycode: u32) {
-            let display = self.instance();
-
             if let Some((last_keyval, last_keycode)) = self.last_key_press.get() {
                 if (last_keyval, last_keycode) == (keyval.into_glib(), keycode) {
                     self.last_key_press.set(None);
@@ -775,7 +760,7 @@ pub mod imp {
                         timeout_id.remove();
                     }
 
-                    display.emit_by_name::<()>(
+                    self.obj().emit_by_name::<()>(
                         "key-event",
                         &[
                             &keyval.into_glib(),
@@ -790,7 +775,7 @@ pub mod imp {
             // flush pending key event
             self.emit_last_key_press();
 
-            display.emit_by_name::<()>(
+            self.obj().emit_by_name::<()>(
                 "key-event",
                 &[&keyval.into_glib(), &keycode, &KeyEvent::RELEASE],
             )
@@ -801,7 +786,6 @@ pub mod imp {
                 return false;
             }
 
-            let obj = self.instance();
             let toplevel = match self.toplevel() {
                 Some(toplevel) => toplevel,
                 _ => return false,
@@ -810,31 +794,28 @@ pub mod imp {
             toplevel.inhibit_system_shortcuts(None::<&gdk::ButtonEvent>);
             let ec = gtk::EventControllerKey::new();
             ec.set_propagation_phase(gtk::PropagationPhase::Capture);
-            ec.connect_key_pressed(clone!(@weak obj, @weak toplevel => @default-panic, move |ec, keyval, keycode, _state| {
-                let imp = Self::from_instance(&obj);
-                imp.key_pressed(ec, keyval, keycode);
+            ec.connect_key_pressed(clone!(@weak self as this, @weak toplevel => @default-panic, move |ec, keyval, keycode, _state| {
+                this.key_pressed(ec, keyval, keycode);
                 glib::signal::Inhibit(true)
             }));
             ec.connect_key_released(
-                clone!(@weak obj => @default-panic, move |_ec, keyval, keycode, _state| {
-                    let imp = Self::from_instance(&obj);
-                    imp.key_released(keyval, keycode);
+                clone!(@weak self as this => @default-panic, move |_ec, keyval, keycode, _state| {
+                    this.key_released(keyval, keycode);
                 }),
             );
-            if let Some(root) = obj.root() {
+            if let Some(root) = self.obj().root() {
                 root.add_controller(&ec);
             }
             self.grab_ec.set(Some(&ec));
 
             let id = toplevel.connect_shortcuts_inhibited_notify(
-                clone!(@weak obj => @default-panic, move |toplevel| {
+                clone!(@weak self as this => @default-panic, move |toplevel| {
                     let inhibited = toplevel.is_shortcuts_inhibited();
                     log::debug!("shortcuts-inhibited: {}", inhibited);
                     if !inhibited {
-                        let imp = Self::from_instance(&obj);
-                        let id = imp.shortcuts_inhibited_id.take();
+                        let id = this.shortcuts_inhibited_id.take();
                         toplevel.disconnect(id.unwrap());
-                        imp.ungrab_keyboard();
+                        this.ungrab_keyboard();
                     }
                 }),
             );
@@ -926,16 +907,16 @@ pub mod imp {
         }
 
         fn try_grab_mouse(&self) -> bool {
-            let obj = self.instance();
-            if obj.mouse_absolute() {
+            if self.obj().mouse_absolute() {
                 // we could eventually grab the mouse in client mode, but what's the point?
                 return false;
             }
-            if obj.grabbed().contains(Grab::MOUSE) {
+            if self.obj().grabbed().contains(Grab::MOUSE) {
                 return false;
             }
 
-            if let Some(default_seat) = gdk::traits::DisplayExt::default_seat(&obj.display()) {
+            if let Some(default_seat) = gdk::traits::DisplayExt::default_seat(&self.obj().display())
+            {
                 for device in default_seat.devices(gdk::SeatCapabilities::POINTER) {
                     if !self.try_grab_device(device) {
                         return false;
@@ -991,21 +972,20 @@ pub mod imp {
         }
 
         fn try_grab(&self) {
-            let display = self.instance();
-            let mut grabbed = display.grabbed();
+            let mut grabbed = self.obj().grabbed();
             if self.try_grab_keyboard() {
                 grabbed |= Grab::KEYBOARD;
             }
             if self.try_grab_mouse() {
                 grabbed |= Grab::MOUSE;
-                if !display.mouse_absolute() {
+                if !self.obj().mouse_absolute() {
                     // hide client mouse
                     self.gl_area().set_cursor_from_name(Some("none"));
                 }
-                display.queue_draw(); // update cursor
+                self.obj().queue_draw(); // update cursor
             }
             self.grabbed.set(grabbed);
-            display.notify("grabbed");
+            self.obj().notify("grabbed");
         }
 
         pub(crate) fn texture_id(&self) -> GLuint {
@@ -1027,13 +1007,13 @@ pub mod imp {
         }
 
         fn borders(&self) -> (u32, u32) {
-            let display = self.instance();
-            let (dw, dh) = match display.display_size() {
+            let obj = self.obj();
+            let (dw, dh) = match obj.display_size() {
                 Some(size) => size,
                 None => return (0, 0),
             };
-            let sf = display.scale_factor();
-            let (w, h) = (display.width() * sf, display.height() * sf);
+            let sf = obj.scale_factor();
+            let (w, h) = (obj.width() * sf, obj.height() * sf);
             let (sw, sh) = (w as f32 / dw as f32, h as f32 / dh as f32);
 
             if sw < sh {
@@ -1046,11 +1026,11 @@ pub mod imp {
         }
 
         pub(crate) fn viewport(&self) -> Option<gdk::Rectangle> {
-            let display = self.instance();
-            display.display_size()?;
+            let obj = self.obj();
+            obj.display_size()?;
 
-            let sf = display.scale_factor();
-            let (w, h) = (display.width() * sf, display.height() * sf);
+            let sf = obj.scale_factor();
+            let (w, h) = (obj.width() * sf, obj.height() * sf);
             let (borderw, borderh) = self.borders();
             let (borderw, borderh) = (borderw as i32, borderh as i32);
             Some(gdk::Rectangle::new(
@@ -1063,14 +1043,14 @@ pub mod imp {
 
         // widget -> remote display pos
         fn transform_pos(&self, x: f64, y: f64) -> Option<(f64, f64)> {
-            let display = self.instance();
-            let sf = display.scale_factor() as f64;
+            let obj = self.obj();
+            let sf = obj.scale_factor() as f64;
             self.viewport().and_then(|vp| {
                 let (x, y) = (x * sf, y * sf);
                 if !vp.contains_point(x as _, y as _) {
                     return None;
                 }
-                let (sw, sh) = display.display_size().unwrap();
+                let (sw, sh) = obj.display_size().unwrap();
                 let x = (x - vp.x() as f64) * (sw as f64 / vp.width() as f64);
                 let y = (y - vp.y() as f64) * (sh as f64 / vp.height() as f64);
                 Some((x, y))
@@ -1079,10 +1059,10 @@ pub mod imp {
 
         // remote display pos -> widget pos
         fn transform_pos_inv(&self, x: f64, y: f64) -> Option<(f64, f64)> {
-            let display = self.instance();
-            let sf = display.scale_factor() as f64;
+            let obj = self.obj();
+            let sf = obj.scale_factor() as f64;
             self.viewport().map(|vp| {
-                let (sw, sh) = display.display_size().unwrap();
+                let (sw, sh) = obj.display_size().unwrap();
                 let x = x * (vp.width() as f64 / sw as f64) + vp.x() as f64;
                 let y = y * (vp.height() as f64 / sh as f64) + vp.y() as f64;
                 (x / sf as f64, y / sf as f64)
@@ -1090,17 +1070,16 @@ pub mod imp {
         }
 
         fn toplevel(&self) -> Option<gdk::Toplevel> {
-            let display = self.instance();
-            display
-                .root()
+            let obj = self.obj();
+            obj.root()
                 .and_then(|r| r.native())
                 .map(|n| n.surface())
                 .and_then(|s| s.downcast::<gdk::Toplevel>().ok())
         }
 
         fn surface(&self) -> Option<gdk::Surface> {
-            let display = self.instance();
-            display.native().map(|n| n.surface())
+            let obj = self.obj();
+            obj.native().map(|n| n.surface())
         }
 
         #[cfg(windows)]
@@ -1136,7 +1115,7 @@ pub mod imp {
 
         #[cfg(unix)]
         pub(crate) fn egl_display(&self) -> Option<egl::Display> {
-            let widget = self.instance();
+            let widget = self.obj();
 
             if let Ok(dpy) = widget.display().downcast::<gdk_wl::WaylandDisplay>() {
                 return dpy.egl_display();
@@ -1339,7 +1318,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         }
         #[cfg(not(feature = "bindings"))]
         {
-            let imp = imp::Display::from_instance(self_);
+            let imp = imp::Display::from_obj(self_);
 
             imp.display_size.get()
         }
@@ -1360,7 +1339,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         }
         #[cfg(not(feature = "bindings"))]
         {
-            let imp = imp::Display::from_instance(self_);
+            let imp = imp::Display::from_obj(self_);
 
             if self.display_size() == size {
                 return;
@@ -1399,7 +1378,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         }
         #[cfg(not(feature = "bindings"))]
         {
-            let imp = imp::Display::from_instance(self_);
+            let imp = imp::Display::from_obj(self_);
             if self.mouse_absolute() {
                 imp.gl_area().set_cursor(cursor.as_ref());
             }
@@ -1429,7 +1408,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         }
         #[cfg(not(feature = "bindings"))]
         {
-            let imp = imp::Display::from_instance(self_);
+            let imp = imp::Display::from_obj(self_);
 
             imp.cursor_position.set(pos);
             self.queue_draw();
@@ -1454,7 +1433,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         }
         #[cfg(not(feature = "bindings"))]
         {
-            let imp = imp::Display::from_instance(self_);
+            let imp = imp::Display::from_obj(self_);
             let _ctx = imp.make_current();
 
             // TODO: check data boundaries
@@ -1493,7 +1472,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         }
         #[cfg(all(unix, not(feature = "bindings")))]
         {
-            let imp = imp::Display::from_instance(self_);
+            let imp = imp::Display::from_obj(self_);
             let _ctx = imp.make_current();
 
             let egl = egl::egl();
@@ -1572,7 +1551,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
         }
         #[cfg(not(feature = "bindings"))]
         {
-            let imp = imp::Display::from_instance(self_);
+            let imp = imp::Display::from_obj(self_);
             let _ctx = imp.make_current();
 
             unsafe {
