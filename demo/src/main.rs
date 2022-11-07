@@ -208,6 +208,7 @@ fn make_display(app: &gtk::Application, mut uri: String) -> rdw::Display {
 
 fn main() {
     env_logger::init();
+    #[cfg(feature = "bindings")]
     unsafe {
         rdw::setup_logger(log::logger(), log::max_level()).unwrap();
     }
