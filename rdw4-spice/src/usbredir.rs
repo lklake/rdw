@@ -36,7 +36,7 @@ impl UsbRedir {
                                 if state {
                                     item.set_property("active", false);
                                 }
-                                redir.emit_by_name::<()>("show-error",&[&e.to_string()]);
+                                redir.emit_by_name::<bool>("show-error",&[&e.to_string()]);
                             },
                         }
                     }));
@@ -46,7 +46,7 @@ impl UsbRedir {
         }));
 
         manager.connect_device_error(clone!(@weak redir => move |_, _, e| {
-            redir.emit_by_name::<()>("show-error",&[&e.to_string()]);
+            redir.emit_by_name::<bool>("show-error",&[&e.to_string()]);
         }));
 
         let free_channels = manager.free_channels();
