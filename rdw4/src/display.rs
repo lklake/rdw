@@ -57,6 +57,8 @@ pub mod imp {
         cell::{Cell, RefCell},
         time::Duration,
     };
+    #[cfg(windows)]
+    use windows::Win32::UI::WindowsAndMessaging::HHOOK;
     #[cfg(unix)]
     use x11::xlib;
 
@@ -126,6 +128,8 @@ pub mod imp {
         pub(crate) win_mouse_speed: Cell<isize>,
         #[cfg(windows)]
         pub(crate) win_filter: Cell<Option<gdk_win32::Win32DisplayFilterHandle>>,
+        #[cfg(windows)]
+        pub(crate) win_hook: Cell<Option<HHOOK>>,
     }
 
     #[glib::object_subclass]
@@ -751,6 +755,10 @@ pub mod imp {
             }
             if let Some(toplevel) = self.toplevel() {
                 toplevel.restore_system_shortcuts();
+                #[cfg(windows)]
+                if let Some(h) = self.win_hook.take() {
+                    let _ = win32::unhook(h);
+                }
                 self.grabbed.set(self.grabbed.get() - Grab::KEYBOARD);
                 self.obj().notify("grabbed");
             }
@@ -861,6 +869,13 @@ pub mod imp {
             };
 
             toplevel.inhibit_system_shortcuts(None::<&gdk::ButtonEvent>);
+            // Apparently, inhibit-system is not implemented on win32 yet
+            #[cfg(windows)]
+            match win32::hook_keyboard() {
+                Ok(h) => self.win_hook.set(Some(h)),
+                Err(e) => log::warn!("Failed to set keyboard hook: {}", e),
+            }
+
             let ec = gtk::EventControllerKey::new();
             ec.set_propagation_phase(gtk::PropagationPhase::Capture);
             ec.connect_key_pressed(clone!(@weak self as this, @weak toplevel => @default-panic, move |ec, keyval, keycode, _state| {
