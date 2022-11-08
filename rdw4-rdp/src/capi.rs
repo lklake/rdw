@@ -23,6 +23,8 @@ pub extern "C" fn rdw_rdp_display_connect(dpy: *mut RdwRdpDisplay) -> bool {
 
 /// rdw_rdp_display_get_settings:
 /// @dpy: A #RdwDisplay
+///
+/// Returns: (transfer none): the associated FreeRDP settings
 #[no_mangle]
 pub extern "C" fn rdw_rdp_display_get_settings(dpy: *mut RdwRdpDisplay) -> *mut sys::rdpSettings {
     let this: &Display = unsafe { &from_glib_borrow(dpy) };

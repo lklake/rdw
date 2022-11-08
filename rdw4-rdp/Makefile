@@ -28,6 +28,7 @@ $(GIR): $(HEADER)
 		--identifier-prefix RdwRdp \
 		-Iinst/include --c-include "rdw-rdp.h" \
 		--library=rdw4-rdp --library-path=inst/usr/$(LIB) \
+		--include-uninstalled=freerdp2-1.0.gir \
 		--include=Rdw-4.0 --pkg rdw4 \
 		--pkg freerdp2 \
 		--output $@ \
@@ -35,15 +36,21 @@ $(GIR): $(HEADER)
 
 $(TYPELIB): $(GIR)
 	mkdir -p $(@D)
-	g-ir-compiler $< -o $@
+	g-ir-compiler \
+		--includedir . \
+		$< -o $@
 
 $(VAPI): $(GIR)
 	mkdir -p $(@D)
 	vapigen \
+		--girdir . \
+		--metadatadir . \
 		--pkg rdw4 \
+		--pkg freerdp2 \
 		--library rdw4-rdp \
 		$< -d $(@D)
 	echo rdw4 > $(@D)/rdw4-rdp.deps
+	echo freerdp2 >> $(@D)/rdw4-rdp.deps
 
 install: $(HEADER)
 	sudo cp -r inst/* $(DESTDIR)/
