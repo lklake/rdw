@@ -124,6 +124,8 @@ pub mod imp {
         pub(crate) win_mouse: Cell<[isize; 3]>,
         #[cfg(windows)]
         pub(crate) win_mouse_speed: Cell<isize>,
+        #[cfg(windows)]
+        pub(crate) win_filter: Cell<Option<gdk_win32::Win32DisplayFilterHandle>>,
     }
 
     #[glib::object_subclass]
@@ -334,6 +336,11 @@ pub mod imp {
             #[cfg(unix)]
             if let Ok(dpy) = self.obj().display().downcast::<gdk_wl::WaylandDisplay>() {
                 self.realize_wl(&dpy);
+            }
+
+            #[cfg(windows)]
+            if let Ok(dpy) = self.obj().display().downcast::<gdk_win32::Win32Display>() {
+                self.realize_win32(&dpy);
             }
 
             let ec = gtk::EventControllerKey::new();
@@ -612,6 +619,69 @@ pub mod imp {
             self.wl_source.set(Some(source))
         }
 
+        #[cfg(windows)]
+        fn realize_win32(&self, dpy: &gdk_win32::Win32Display) {
+            use windows::Win32::Devices::HumanInterfaceDevice::{
+                HID_USAGE_GENERIC_MOUSE, HID_USAGE_PAGE_GENERIC,
+            };
+            use windows::Win32::UI::Input::{
+                RegisterRawInputDevices, RAWINPUTDEVICE, RIDEV_INPUTSINK,
+            };
+
+            let Some(hwnd) = self.win32_handle() else {
+                log::warn!("Failed to get windows handle");
+                return;
+            };
+            let rid = RAWINPUTDEVICE {
+                usUsagePage: HID_USAGE_PAGE_GENERIC,
+                usUsage: HID_USAGE_GENERIC_MOUSE,
+                dwFlags: RIDEV_INPUTSINK,
+                hwndTarget: hwnd,
+            };
+            if let Err(e) =
+                unsafe { RegisterRawInputDevices(&[rid], std::mem::size_of_val(&rid) as _).ok() }
+            {
+                log::warn!("Failed to RegisterRawInputDevices: {e}");
+                return;
+            }
+
+            let filter = dpy.add_filter(clone!(@weak self as this => @default-panic, move |_, msg, _rv| {
+                use windows::Win32::UI::Input::{
+                    GetRawInputData, HRAWINPUT, RAWINPUT, RAWINPUTHEADER, RID_INPUT, RIM_TYPEMOUSE,
+                };
+                use windows::Win32::UI::WindowsAndMessaging::WM_INPUT;
+
+                if !this.grabbed.get().contains(Grab::MOUSE) || msg.message != WM_INPUT {
+                    return gdk_win32::Win32MessageFilterReturn::Continue;
+                }
+
+                let mut input = RAWINPUT::default();
+                let mut pcbsize = std::mem::size_of_val(&input) as u32;
+                unsafe {
+                    let res = GetRawInputData(
+                        HRAWINPUT(msg.lParam.0),
+                        RID_INPUT,
+                        Some(&mut input as *mut _ as *mut _),
+                        &mut pcbsize as *mut _,
+                        std::mem::size_of::<RAWINPUTHEADER>() as _,
+                    );
+                    if res == u32::MAX {
+                        log::warn!("Failed to GetRawInputData");
+                    }
+                    if input.header.dwType == RIM_TYPEMOUSE.0 {
+                        let (dx, dy) = (input.data.mouse.lLastX, input.data.mouse.lLastY);
+                        let scale = this.obj().scale_factor() as f64;
+                        let (dx, dy) = (dx as f64 / scale, dy as f64 / scale);
+                        this.obj().emit_by_name::<()>("motion-relative", &[&dx, &dy]);
+                    }
+                }
+
+                gdk_win32::Win32MessageFilterReturn::Continue
+            }));
+
+            self.win_filter.set(Some(filter));
+        }
+
         pub(crate) fn gl_area(&self) -> &gtk::GLArea {
             self.gl_area.get().unwrap()
         }
@@ -874,15 +944,39 @@ pub mod imp {
                 return false;
             }
 
-            let h = unsafe { MonitorFromRect(&win_rect, MONITOR_DEFAULTTONEAREST) };
-            if h.is_invalid() {
+            // FIXME.. if we could ensure our own surface/window we wouldn't need this broken logic
+            let obj = self.obj().clone().upcast::<gtk::Widget>();
+            let mut w = obj;
+            let walloc = w.allocation();
+            let mut alloc = gtk::Allocation::new(0, 0, walloc.width(), walloc.height());
+            loop {
+                let walloc = w.allocation();
+                alloc = gtk::Allocation::new(
+                    alloc.x() + walloc.x(),
+                    alloc.y() + walloc.y(),
+                    alloc.width(),
+                    alloc.height(),
+                );
+                w = if let Some(w) = w.parent() {
+                    w
+                } else {
+                    break;
+                }
+            }
+            win_rect.left += alloc.x();
+            win_rect.top += alloc.y();
+            win_rect.right = win_rect.left + alloc.width();
+            win_rect.bottom = win_rect.top + alloc.height();
+
+            let hm = unsafe { MonitorFromRect(&win_rect, MONITOR_DEFAULTTONEAREST) };
+            if hm.is_invalid() {
                 log::warn!("Failed to MonitorFromRect");
                 return false;
             }
 
             let mut info: MONITORINFO = unsafe { std::mem::zeroed() };
             info.cbSize = std::mem::size_of_val(&info) as _;
-            if let Err(e) = unsafe { GetMonitorInfoA(h, &mut info).ok() } {
+            if let Err(e) = unsafe { GetMonitorInfoA(hm, &mut info).ok() } {
                 log::warn!("Failed to GetMonitorInfoA: {e}");
                 return false;
             }
