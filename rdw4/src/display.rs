@@ -371,7 +371,9 @@ pub mod imp {
                 }
             }));
             ec.connect_leave(clone!(@weak self as this => move |_| {
+                log::debug!("leave -> ungrab");
                 this.ungrab_keyboard();
+                this.ungrab_mouse();
             }));
 
             let ec = gtk::GestureClick::new();
