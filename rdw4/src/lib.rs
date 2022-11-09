@@ -14,6 +14,7 @@ mod display;
 mod egl;
 mod error;
 mod gstaudio;
+mod keymap;
 mod usbredir;
 #[cfg(windows)]
 mod win32;
@@ -27,6 +28,7 @@ pub use display::*;
 pub use egl::RdwDmabufScanout;
 pub use error::Error;
 pub use gstaudio::*;
+pub use keymap::*;
 pub use usbredir::{Device as UsbDevice, UsbRedir};
 
 #[cfg(feature = "capi")]

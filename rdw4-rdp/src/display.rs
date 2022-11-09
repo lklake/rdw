@@ -40,7 +40,6 @@ mod imp {
     };
     use glib::subclass::Signal;
     use gtk::subclass::prelude::*;
-    use keycodemap::KEYMAP_XORGEVDEV2XTKBD;
     use once_cell::sync::{Lazy, OnceCell};
     use rdw::gtk::{gdk, gio, glib::MainContext};
     use std::{
@@ -101,6 +100,7 @@ mod imp {
         rx: RefCell<Option<futures::channel::mpsc::Receiver<RdpEvent>>>,
         last_mouse: Cell<(f64, f64)>,
         clipboard: Clipboard,
+        keymap: Cell<Option<&'static [u16]>>,
     }
 
     impl Default for Display {
@@ -124,6 +124,7 @@ mod imp {
                 last_mouse: Cell::new((0.0, 0.0)),
                 rx: RefCell::new(Some(rx)),
                 clipboard: Default::default(),
+                keymap: Default::default(),
             }
         }
     }
@@ -157,8 +158,7 @@ mod imp {
                 if keyval == gdk::Key::Pause.into_glib() {
                     unimplemented!()
                 }
-                if let Some(&xt) = KEYMAP_XORGEVDEV2XTKBD.get(keycode as usize) {
-                    log::debug!("xt: {:?}", xt);
+                if let Some(&xt) = this.keymap.get().and_then(|m| m.get(keycode as usize)) {
                     MainContext::default().spawn_local(glib::clone!(@weak this => async move {
                         let flags = if xt & 0x100 > 0 {
                             KbdFlags::EXTENDED
@@ -226,6 +226,8 @@ mod imp {
     impl WidgetImpl for Display {
         fn realize(&self) {
             self.parent_realize();
+
+            self.keymap.set(rdw::keymap_xtkbd());
 
             let ec = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
             self.obj().add_controller(&ec);

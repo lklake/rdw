@@ -3,7 +3,6 @@ use gtk::{glib, prelude::*};
 use gvnc::prelude::*;
 use rdw::gtk;
 
-use keycodemap::KEYMAP_XORGEVDEV2QNUM;
 use rdw::DisplayExt;
 
 mod imp {
@@ -50,17 +49,19 @@ mod imp {
         pub(crate) allow_lossy: bool,
         pub(crate) last_motion: Cell<Option<(f64, f64)>>,
         pub(crate) last_button_mask: Cell<Option<u8>>,
+        pub(crate) keymap: Cell<Option<&'static [u16]>>,
     }
 
     impl Default for Display {
         fn default() -> Self {
             Self {
-                connection: gvnc::Connection::new(),
                 fb: RefCell::new(None),
+                connection: gvnc::Connection::new(),
                 keycode_map: true,
                 allow_lossy: true,
                 last_motion: Cell::new(None),
                 last_button_mask: Cell::new(None),
+                keymap: Cell::new(None),
             }
         }
     }
@@ -280,7 +281,13 @@ mod imp {
         }
     }
 
-    impl WidgetImpl for Display {}
+    impl WidgetImpl for Display {
+        fn realize(&self) {
+            self.parent_realize();
+
+            self.keymap.set(rdw::keymap_qnum());
+        }
+    }
 
     impl rdw::DisplayImpl for Display {}
 
@@ -291,7 +298,7 @@ mod imp {
 
         fn key_event(&self, press: bool, keyval: u32, keycode: u32) {
             // TODO: get the correct keymap according to gdk display type
-            if let Some(qnum) = KEYMAP_XORGEVDEV2QNUM.get(keycode as usize) {
+            if let Some(qnum) = self.keymap.get().and_then(|m| m.get(keycode as usize)) {
                 if let Err(e) = self.connection.key_event(press, keyval, *qnum) {
                     log::warn!("Failed to send key event: {}", e);
                 }

@@ -2,7 +2,6 @@ use std::convert::TryFrom;
 
 use glib::{clone, signal::SignalHandlerId, subclass::prelude::*};
 use gtk::{gdk, gio, glib, prelude::*};
-use keycodemap::KEYMAP_XORGEVDEV2XTKBD;
 use rdw::{gtk, DisplayExt};
 use spice::prelude::*;
 use spice_client_glib as spice;
@@ -55,6 +54,7 @@ mod imp {
 
     #[derive(Default)]
     pub struct Display {
+        pub(crate) keymap: Cell<Option<&'static [u16]>>,
         pub(crate) session: spice::Session,
         pub(crate) monitor_config: Cell<Option<spice::DisplayMonitorConfig>>,
         pub(crate) main: glib::WeakRef<spice::MainChannel>,
@@ -112,8 +112,7 @@ mod imp {
             self.obj().connect_key_event(
                 clone!(@weak self as this => move |_, keyval, keycode, event| {
                     log::debug!("key-event: {:?}", (event, keyval, keycode));
-                    // TODO: get the correct keymap according to gdk display type
-                    if let Some(&xt) = KEYMAP_XORGEVDEV2XTKBD.get(keycode as usize) {
+                    if let Some(&xt) = this.keymap.get().and_then(|m| m.get(keycode as usize)) {
                         if let Some(input) = this.input.upgrade() {
                             if event.contains(rdw::KeyEvent::PRESS|rdw::KeyEvent::RELEASE) {
                                 input.key_press_and_release(xt as _)
@@ -433,6 +432,7 @@ mod imp {
 
             self.add_clipboard_watch(0);
             self.add_clipboard_watch(1);
+            self.keymap.set(rdw::keymap_xtkbd());
         }
     }
 
