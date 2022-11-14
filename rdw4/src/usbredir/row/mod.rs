@@ -14,6 +14,6 @@ impl Row {
 
     pub(crate) fn switch(&self) -> &gtk::Switch {
         let imp = imp::Row::from_obj(self);
-        &*imp.switch
+        &imp.switch
     }
 }

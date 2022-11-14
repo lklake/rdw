@@ -1485,7 +1485,7 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
     }
 
     fn set_mouse_absolute(&self, absolute: bool) {
-        glib::ObjectExt::set_property(self, "mouse-absolute", &absolute);
+        glib::ObjectExt::set_property(self, "mouse-absolute", absolute);
     }
 
     fn set_cursor_position(&self, pos: Option<(usize, usize)>) {
