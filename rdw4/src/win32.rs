@@ -119,6 +119,26 @@ mod imp {
     pub(crate) fn unhook(hook: HHOOK) -> Result<()> {
         unsafe { UnhookWindowsHookEx(hook).ok() }
     }
+
+    pub(crate) fn hook_mouse() -> Result<HHOOK> {
+        use windows::Win32::System::LibraryLoader::GetModuleHandleA;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CallNextHookEx, HC_ACTION, WH_MOUSE_LL, WM_MOUSEMOVE,
+        };
+
+        unsafe extern "system" fn hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+            if code != HC_ACTION as i32 {
+                return CallNextHookEx(None, code, wparam, lparam);
+            }
+            if wparam.0 == WM_MOUSEMOVE as _ {
+                return LRESULT(1);
+            }
+
+            CallNextHookEx(None, code, wparam, lparam)
+        }
+
+        unsafe { SetWindowsHookExA(WH_MOUSE_LL, Some(hook), GetModuleHandleA(None)?, 0) }
+    }
 }
 
 #[cfg(not(feature = "bindings"))]

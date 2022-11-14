@@ -130,6 +130,8 @@ pub mod imp {
         pub(crate) win_filter: Cell<Option<gdk_win32::Win32DisplayFilterHandle>>,
         #[cfg(windows)]
         pub(crate) win_hook: Cell<Option<HHOOK>>,
+        #[cfg(windows)]
+        pub(crate) win_mouse_hook: Cell<Option<HHOOK>>,
     }
 
     #[glib::object_subclass]
@@ -776,9 +778,11 @@ pub mod imp {
                 }
                 #[cfg(windows)]
                 unsafe {
-                    windows::Win32::UI::WindowsAndMessaging::ClipCursor(None)
-                };
-
+                    windows::Win32::UI::WindowsAndMessaging::ClipCursor(None);
+                    if let Some(h) = self.win_mouse_hook.take() {
+                        let _ = win32::unhook(h);
+                    }
+                }
                 self.restore_accel_mouse();
 
                 self.grabbed.set(self.grabbed.get() - Grab::MOUSE);
@@ -945,10 +949,6 @@ pub mod imp {
 
         #[cfg(windows)]
         fn try_grab_device(&self, _device: gdk::Device) -> bool {
-            use windows::Win32::Graphics::Gdi::{
-                GetMonitorInfoA, IntersectRect, MonitorFromRect, MONITORINFO,
-                MONITOR_DEFAULTTONEAREST,
-            };
             use windows::Win32::UI::WindowsAndMessaging::{ClipCursor, GetWindowRect};
 
             let h = match self.win32_handle() {
@@ -961,52 +961,21 @@ pub mod imp {
                 return false;
             }
 
-            // FIXME.. if we could ensure our own surface/window we wouldn't need this broken logic
-            let obj = self.obj().clone().upcast::<gtk::Widget>();
-            let mut w = obj;
-            let walloc = w.allocation();
-            let mut alloc = gtk::Allocation::new(0, 0, walloc.width(), walloc.height());
-            loop {
-                let walloc = w.allocation();
-                alloc = gtk::Allocation::new(
-                    alloc.x() + walloc.x(),
-                    alloc.y() + walloc.y(),
-                    alloc.width(),
-                    alloc.height(),
-                );
-                w = if let Some(w) = w.parent() {
-                    w
-                } else {
-                    break;
-                }
-            }
-            win_rect.left += alloc.x();
-            win_rect.top += alloc.y();
-            win_rect.right = win_rect.left + alloc.width();
-            win_rect.bottom = win_rect.top + alloc.height();
+            // a very small clip, hopefully in the center of our widget.
+            // FIXME: find real coordinates of our own widget instead
+            win_rect.left = (win_rect.left + win_rect.right) / 2;
+            win_rect.right = win_rect.left + 1;
+            win_rect.top = (win_rect.top + win_rect.bottom) / 2;
+            win_rect.bottom = win_rect.top + 1;
 
-            let hm = unsafe { MonitorFromRect(&win_rect, MONITOR_DEFAULTTONEAREST) };
-            if hm.is_invalid() {
-                log::warn!("Failed to MonitorFromRect");
-                return false;
-            }
-
-            let mut info: MONITORINFO = unsafe { std::mem::zeroed() };
-            info.cbSize = std::mem::size_of_val(&info) as _;
-            if let Err(e) = unsafe { GetMonitorInfoA(hm, &mut info).ok() } {
-                log::warn!("Failed to GetMonitorInfoA: {e}");
-                return false;
-            }
-
-            let mut rect = unsafe { std::mem::zeroed() };
-            if let Err(e) = unsafe { IntersectRect(&mut rect, &win_rect, &info.rcWork).ok() } {
-                log::warn!("Failed to IntersectRect: {e}");
-                return false;
-            }
-
-            if let Err(e) = unsafe { ClipCursor(Some(&rect)).ok() } {
+            if let Err(e) = unsafe { ClipCursor(Some(&win_rect)).ok() } {
                 log::warn!("Failed to ClipCursor: {e}");
                 return false;
+            }
+
+            match win32::hook_mouse() {
+                Ok(h) => self.win_mouse_hook.set(Some(h)),
+                Err(e) => log::warn!("Failed to set mouse hook: {}", e),
             }
 
             true
