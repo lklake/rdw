@@ -9,15 +9,15 @@ variables:
   FDO_UPSTREAM_REPO: malureau/rdw
   GIT_SUBMODULE_STRATEGY: recursive
 
-.rdw.fedora:36:
+.rdw.fedora:37:
   variables:
-    FDO_DISTRIBUTION_VERSION: 36
-    FDO_DISTRIBUTION_TAG: '2022-10-31.0'
+    FDO_DISTRIBUTION_VERSION: 37
+    FDO_DISTRIBUTION_TAG: '2022-11-15.0'
 
 build-fedora-container:
   extends:
   - .fdo.container-build@fedora@x86_64
-  - .rdw.fedora:36
+  - .rdw.fedora:37
   stage: container
   variables:
     FDO_DISTRIBUTION_PACKAGES: >-
@@ -40,7 +40,7 @@ build-fedora-container:
 test-build:
   extends:
     - .fdo.distribution-image@fedora
-    - .rdw.fedora:36
+    - .rdw.fedora:37
   stage: test
   script:
     - pushd rdw4
