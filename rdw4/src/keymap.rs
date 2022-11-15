@@ -1,67 +1,55 @@
 use gtk::prelude::*;
+use gtk::gdk;
 
-pub fn keymap_xtkbd() -> Option<&'static [u16]> {
+fn get_display() -> Option<gdk::Display> {
     let Some(window) = gtk::Window::toplevels().item(0).and_then(|w| w.downcast::<gtk::Widget>().ok()) else {
         log::warn!("No top-level window? no keymap...");
         return None;
     };
 
-    #[cfg(windows)]
-    if window
-        .display()
-        .downcast::<gdk_win32::Win32Display>()
-        .is_ok()
-    {
-        return Some(keycodemap::KEYMAP_WIN322XTKBD);
+    Some(window.display())
+}
+
+pub fn keymap_xtkbd() -> Option<&'static [u16]> {
+    let Some(dpy) = get_display() else {
+        return None;
     };
 
-    #[cfg(unix)]
-    if window
-        .display()
-        .downcast::<gdk_wl::WaylandDisplay>()
-        .is_ok()
-    {
-        return Some(keycodemap::KEYMAP_XORGEVDEV2XTKBD);
-    }
-
-    #[cfg(unix)]
-    if let Ok(_dpy) = window.display().downcast::<gdk_x11::X11Display>() {
-        todo!()
+    let map = match dpy.backend() {
+        #[cfg(windows)]
+        gdk::Backend::Win32 => keycodemap::KEYMAP_WIN322XTKBD,
+        gdk::Backend::Wayland => keycodemap::KEYMAP_XORGEVDEV2XTKBD,
+        gdk::Backend::X11 => {
+            // TODO check X11 server..
+            keycodemap::KEYMAP_XORGEVDEV2XTKBD
+        },
+        be => {
+            log::warn!("Unsupported display backend: {be:?}");
+            return None;
+        }
     };
 
-    log::warn!("Unsupported GDK windowing platform. Please report an issue!");
-    None
+    Some(map)
 }
 
 pub fn keymap_qnum() -> Option<&'static [u16]> {
-    let Some(window) = gtk::Window::toplevels().item(0).and_then(|w| w.downcast::<gtk::Widget>().ok()) else {
-        log::warn!("No top-level window? no keymap...");
+    let Some(dpy) = get_display() else {
         return None;
     };
 
-    #[cfg(windows)]
-    if window
-        .display()
-        .downcast::<gdk_win32::Win32Display>()
-        .is_ok()
-    {
-        return Some(keycodemap::KEYMAP_WIN322QNUM);
+    let map = match dpy.backend() {
+        #[cfg(windows)]
+        gdk::Backend::Win32 => keycodemap::KEYMAP_WIN322QNUM,
+        gdk::Backend::Wayland => keycodemap::KEYMAP_XORGEVDEV2QNUM,
+        gdk::Backend::X11 => {
+            // TODO check X11 server..
+            keycodemap::KEYMAP_XORGEVDEV2QNUM
+        },
+        be => {
+            log::warn!("Unsupported display backend: {be:?}");
+            return None;
+        }
     };
 
-    #[cfg(unix)]
-    if window
-        .display()
-        .downcast::<gdk_wl::WaylandDisplay>()
-        .is_ok()
-    {
-        return Some(keycodemap::KEYMAP_XORGEVDEV2QNUM);
-    }
-
-    #[cfg(unix)]
-    if let Ok(_dpy) = window.display().downcast::<gdk_x11::X11Display>() {
-        todo!()
-    };
-
-    log::warn!("Unsupported GDK windowing platform. Please report an issue!");
-    None
+    Some(map)
 }
