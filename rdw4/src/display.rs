@@ -387,7 +387,12 @@ pub mod imp {
             self.obj().add_controller(&ec);
             ec.connect_pressed(
                 clone!(@weak self as this => @default-panic, move |gesture, _n_press, x, y| {
-                    this.try_grab();
+                    let grabbed = this.try_grab();
+
+                    if grabbed.contains(Grab::MOUSE) {
+                        log::debug!("Skipping mouse-press, since we took the grab");
+                        return;
+                    }
 
                     let button = gesture.current_button();
                     if let Some((x, y)) = this.transform_pos(x, y) {
@@ -1051,8 +1056,8 @@ pub mod imp {
             }
         }
 
-        fn try_grab(&self) {
-            let mut grabbed = self.obj().grabbed();
+        fn try_grab(&self) -> Grab {
+            let mut grabbed = Default::default();
             if self.try_grab_keyboard() {
                 grabbed |= Grab::KEYBOARD;
             }
@@ -1064,8 +1069,9 @@ pub mod imp {
                 }
                 self.obj().queue_draw(); // update cursor
             }
-            self.grabbed.set(grabbed);
+            self.grabbed.set(self.obj().grabbed() | grabbed);
             self.obj().notify("grabbed");
+            grabbed
         }
 
         pub(crate) fn texture_id(&self) -> GLuint {
