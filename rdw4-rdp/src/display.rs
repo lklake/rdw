@@ -276,15 +276,14 @@ mod imp {
     impl rdw::DisplayImpl for Display {}
 
     impl Display {
-        fn dispatch_rdp_event(&self, obj: &super::Display, e: RdpEvent) {
+        fn dispatch_rdp_event(&self, e: RdpEvent) {
             match e {
                 RdpEvent::Authenticate { .. } => {
                     self.state.replace(Some(e));
                     glib::idle_add_local(
-                        glib::clone!(@weak obj => @default-return Continue(false), move || {
-                            let res = obj.emit_by_name::<bool>("rdp-authenticate", &[]);
-                            let imp = imp::Display::from_obj(&obj);
-                            match imp.state.take().unwrap() {
+                        glib::clone!(@weak self as this => @default-return Continue(false), move || {
+                            let res = this.obj().emit_by_name::<bool>("rdp-authenticate", &[]);
+                            match this.state.take().unwrap() {
                                 RdpEvent::Authenticate { settings, tx } => {
                                     let _ = tx.send(if res {
                                         Ok(settings)
@@ -301,7 +300,7 @@ mod imp {
                     );
                 }
                 RdpEvent::DesktopResize { w, h } => {
-                    obj.set_display_size(Some((w as _, h as _)));
+                    self.obj().set_display_size(Some((w as _, h as _)));
                 }
                 RdpEvent::Update { x, y, w, h } => {
                     let ctxt = self.context.lock().unwrap();
@@ -311,7 +310,7 @@ mod imp {
                         let start = (x * 4 + y * stride) as _;
                         let end = ((x + w) * 4 + (y + h - 1) * stride) as _;
 
-                        obj.update_area(
+                        self.obj().update_area(
                             x as _,
                             y as _,
                             w as _,
@@ -329,16 +328,16 @@ mod imp {
                         inner.height,
                         inner.x,
                         inner.y,
-                        obj.scale_factor(),
+                        self.obj().scale_factor(),
                     );
-                    obj.define_cursor(Some(cursor));
+                    self.obj().define_cursor(Some(cursor));
                 }
                 RdpEvent::CursorSetNull => {
                     let cursor = gdk::Cursor::from_name("none", None);
-                    obj.define_cursor(cursor);
+                    self.obj().define_cursor(cursor);
                 }
                 RdpEvent::CursorSetDefault => {
-                    obj.define_cursor(None);
+                    self.obj().define_cursor(None);
                 }
                 RdpEvent::ClipboardData { data } => {
                     if let Some((format, mut tx)) = self.clipboard.tx.take() {
@@ -358,25 +357,24 @@ mod imp {
                     }
                 }
                 RdpEvent::ClipboardSetContent { formats } => {
-                    let cb = gdk::traits::DisplayExt::clipboard(&obj.display());
+                    let cb = gdk::traits::DisplayExt::clipboard(&self.obj().display());
                     let content = rdw::ContentProvider::new(
                         &formats,
-                        clone!(@weak obj => @default-return None, move |mime, stream, prio| {
+                        clone!(@weak self as this => @default-return None, move |mime, stream, prio| {
                             log::debug!("content-provider-write: {:?}", (mime, stream));
                             let format = match format_from_mime(mime) {
                                 Some(format) => format,
                                 _ => return None,
                             };
-                            Some(Box::pin(clone!(@weak obj, @strong stream => @default-return panic!(), async move {
+                            Some(Box::pin(clone!(@weak this, @strong stream => @default-return panic!(), async move {
                                 use futures::stream::StreamExt;
 
-                                let imp = Self::from_obj(&obj);
-                                if imp.clipboard.tx.borrow().is_some() {
+                                if this.clipboard.tx.borrow().is_some() {
                                     return Err(glib::Error::new(gio::IOErrorEnum::Failed, "clipboard request pending"));
                                 }
                                 let (tx, mut rx) = futures::channel::mpsc::channel(1);
-                                imp.clipboard.tx.replace(Some((format, tx)));
-                                if imp.send_event(Event::ClipboardRequest(format)).await.is_ok() {
+                                this.clipboard.tx.replace(Some((format, tx)));
+                                if this.send_event(Event::ClipboardRequest(format)).await.is_ok() {
                                     if let Some(bytes) = rx.next().await {
                                         return stream.write_bytes_future(&bytes, prio).await.map(|_| ());
                                     }
@@ -391,12 +389,11 @@ mod imp {
                     }
                 }
                 RdpEvent::ClipboardDataRequest { format } => {
-                    glib::MainContext::default().spawn_local(glib::clone!(@weak obj => async move {
-                        let imp = Self::from_obj(&obj);
+                    glib::MainContext::default().spawn_local(glib::clone!(@weak self as this => async move {
                         let mut data = None;
 
                         if let Some(mime) = mime_from_format(format) {
-                            let cb = gdk::traits::DisplayExt::clipboard(&obj.display());
+                            let cb = gdk::traits::DisplayExt::clipboard(&this.obj().display());
                             let res = cb.read_future(&[mime], glib::Priority::default()).await;
                             log::debug!("clipboard-read: {:?}", res);
                             if let Ok((stream, _)) = res {
@@ -415,23 +412,21 @@ mod imp {
                                 }
                             }
                         }
-                        let _ = imp.send_event(Event::ClipboardData(data)).await;
+                        let _ = this.send_event(Event::ClipboardData(data)).await;
                     }));
                 }
             }
         }
 
-        pub(crate) fn connect(&self, obj: &super::Display) -> Result<()> {
+        pub(crate) fn connect(&self) -> Result<()> {
             let mut rx = self
                 .rx
                 .take()
                 .ok_or_else(|| RdpError::Failed("already started".into()))?;
 
-            MainContext::default().spawn_local(clone!(@weak obj => async move {
-                let imp = imp::Display::from_obj(&obj);
-
+            MainContext::default().spawn_local(clone!(@weak self as this => async move {
                 while let Some(e) = rx.next().await {
-                    imp.dispatch_rdp_event(&obj, e);
+                    this.dispatch_rdp_event(e);
                 }
             }));
 
@@ -634,15 +629,11 @@ impl Display {
         &self,
         f: impl FnOnce(&mut freerdp::Settings) -> Result<()>,
     ) -> Result<()> {
-        let imp = imp::Display::from_obj(self);
-
-        imp.with_settings(f)
+        self.imp().with_settings(f)
     }
 
     pub fn rdp_connect(&mut self) -> Result<()> {
-        let imp = imp::Display::from_obj(self);
-
-        imp.connect(self)
+        self.imp().connect()
     }
 
     pub fn connect_rdp_authenticate<F: Fn(&Self) -> bool + 'static>(

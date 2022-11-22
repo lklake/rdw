@@ -1,5 +1,5 @@
-use gtk::prelude::*;
 use gtk::gdk;
+use gtk::prelude::*;
 
 fn get_display() -> Option<gdk::Display> {
     let Some(window) = gtk::Window::toplevels().item(0).and_then(|w| w.downcast::<gtk::Widget>().ok()) else {
@@ -22,7 +22,7 @@ pub fn keymap_xtkbd() -> Option<&'static [u16]> {
         gdk::Backend::X11 => {
             // TODO check X11 server..
             keycodemap::KEYMAP_XORGEVDEV2XTKBD
-        },
+        }
         be => {
             log::warn!("Unsupported display backend: {be:?}");
             return None;
@@ -44,7 +44,7 @@ pub fn keymap_qnum() -> Option<&'static [u16]> {
         gdk::Backend::X11 => {
             // TODO check X11 server..
             keycodemap::KEYMAP_XORGEVDEV2QNUM
-        },
+        }
         be => {
             log::warn!("Unsupported display backend: {be:?}");
             return None;
