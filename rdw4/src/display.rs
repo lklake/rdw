@@ -1225,6 +1225,7 @@ impl Display {
         hot_y: i32,
         scale: i32,
     ) -> gdk::Cursor {
+        assert!(scale > 0);
         let pb = gdk::gdk_pixbuf::Pixbuf::from_mut_slice(
             data.to_vec(),
             gdk::gdk_pixbuf::Colorspace::Rgb,

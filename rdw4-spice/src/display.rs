@@ -398,7 +398,7 @@ mod imp {
                                             cursor.height(),
                                             0,
                                             0,
-                                            this.obj().scale_factor()
+                                            1,
                                         );
                                         this.obj().define_cursor(Some(cursor));
                                     }

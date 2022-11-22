@@ -216,7 +216,7 @@ mod imp {
                 this.obj().define_cursor(
                     cursor.map(|c|{
                         let (w, h, hot_x, hot_y, data) = (c.width(), c.height(), c.hotx(), c.hoty(), c.data());
-                        rdw::Display::make_cursor(data, w.into(), h.into(), hot_x.into(), hot_y.into(), this.obj().scale_factor())
+                        rdw::Display::make_cursor(data, w.into(), h.into(), hot_x.into(), hot_y.into(), 1)
                     })
                 );
             }));

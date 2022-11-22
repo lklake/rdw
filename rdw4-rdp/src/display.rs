@@ -328,7 +328,7 @@ mod imp {
                         inner.height,
                         inner.x,
                         inner.y,
-                        self.obj().scale_factor(),
+                        1,
                     );
                     self.obj().define_cursor(Some(cursor));
                 }
