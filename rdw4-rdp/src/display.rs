@@ -105,7 +105,7 @@ mod imp {
 
     impl Default for Display {
         fn default() -> Self {
-            let (tx, rx) = futures::channel::mpsc::channel(1);
+            let (tx, rx) = futures::channel::mpsc::channel(10);
             let mut context = Context::new(RdpContextHandler::new(tx));
             context.settings.set_support_display_control(true);
             context
