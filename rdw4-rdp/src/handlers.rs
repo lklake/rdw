@@ -319,9 +319,8 @@ impl freerdp::client::Handler for RdpContextHandler {
         let mut graphics = context.graphics().ok_or(RdpError::Unsupported)?;
         let mut update = context.update().ok_or(RdpError::Unsupported)?;
 
-        let (w, h) = match (gdi.width(), gdi.height()) {
-            (Some(w), Some(h)) => (w, h),
-            _ => return Err(RdpError::Failed("No GDI dimensions".into())),
+        let (Some(w), Some(h)) = (gdi.width(), gdi.height()) else {
+            return Err(RdpError::Failed("No GDI dimensions".into()));
         };
 
         graphics.register_pointer::<RdpPointerHandler>();
