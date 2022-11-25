@@ -37,6 +37,8 @@ pub(crate) enum RdpEvent {
         settings: freerdp::Settings,
         tx: mpsc::Sender<Result<freerdp::Settings>>,
     },
+    Connected,
+    Disconnected,
     DesktopResize {
         w: u32,
         h: u32,
@@ -331,7 +333,17 @@ impl freerdp::client::Handler for RdpContextHandler {
             context.settings.keyboard_remapping_list().as_deref(),
         );
 
-        context.handler.send_desktop_resize(w, h)
+        context.handler.send_desktop_resize(w, h)?;
+        self.send(RdpEvent::Connected)?;
+        Ok(())
+    }
+
+    fn post_disconnect(&mut self, context: &mut Context<Self>)
+    where
+        Self: Sized,
+    {
+        context.instance.gdi_uninit();
+        let _ = self.send(RdpEvent::Disconnected);
     }
 
     fn clipboard_connected(&mut self, clip: &mut CliprdrClientContext) {

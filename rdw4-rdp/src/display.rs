@@ -101,6 +101,7 @@ mod imp {
         last_mouse: Cell<(f64, f64)>,
         clipboard: Clipboard,
         keymap: Cell<Option<&'static [u16]>>,
+        connected: Cell<bool>,
     }
 
     impl Default for Display {
@@ -125,6 +126,7 @@ mod imp {
                 rx: RefCell::new(Some(rx)),
                 clipboard: Default::default(),
                 keymap: Default::default(),
+                connected: Default::default(),
             }
         }
     }
@@ -139,6 +141,28 @@ mod imp {
     }
 
     impl ObjectImpl for Display {
+        fn properties() -> &'static [glib::ParamSpec] {
+            use glib::ParamFlags as Flags;
+
+            static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
+                vec![glib::ParamSpecBoolean::new(
+                    "rdp-connected",
+                    "RDP connected",
+                    "Whether the RDP connection is up and running",
+                    false,
+                    Flags::READABLE,
+                )]
+            });
+            PROPERTIES.as_ref()
+        }
+
+        fn property(&self, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+            match pspec.name() {
+                "rdp-connected" => self.connected.get().to_value(),
+                _ => unimplemented!(),
+            }
+        }
+
         fn signals() -> &'static [Signal] {
             static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
                 vec![Signal::builder("rdp-authenticate")
@@ -298,6 +322,14 @@ mod imp {
                             Continue(false)
                         }),
                     );
+                }
+                RdpEvent::Connected => {
+                    self.connected.set(true);
+                    self.obj().notify("rdp-connected");
+                }
+                RdpEvent::Disconnected => {
+                    self.connected.set(false);
+                    self.obj().notify("rdp-connected");
                 }
                 RdpEvent::DesktopResize { w, h } => {
                     self.obj().set_display_size(Some((w as _, h as _)));
