@@ -11,7 +11,7 @@ mod imp {
     use once_cell::sync::OnceCell;
 
     #[derive(Debug, Default)]
-    pub struct Framebuffer {
+    pub(crate) struct Framebuffer {
         pub(crate) buffer: OnceCell<Vec<u8>>,
     }
 
@@ -29,11 +29,11 @@ mod imp {
 
 glib::wrapper! {
     // FIXME: make it pub(crate)
-    pub struct Framebuffer(ObjectSubclass<imp::Framebuffer>) @extends gvnc::BaseFramebuffer, @implements gvnc::Framebuffer;
+    pub(crate) struct Framebuffer(ObjectSubclass<imp::Framebuffer>) @extends gvnc::BaseFramebuffer, @implements gvnc::Framebuffer;
 }
 
 impl Framebuffer {
-    pub fn new(width: u16, height: u16, remote_format: &gvnc::PixelFormat) -> Self {
+    pub(crate) fn new(width: u16, height: u16, remote_format: &gvnc::PixelFormat) -> Self {
         let width = width as i32;
         let height = height as i32;
         let local_format = gvnc::PixelFormat::new_with(
@@ -72,7 +72,7 @@ impl Framebuffer {
         fb
     }
 
-    pub fn get_sub(&self, x: usize, y: usize, w: usize, h: usize) -> &[u8] {
+    pub(crate) fn get_sub(&self, x: usize, y: usize, w: usize, h: usize) -> &[u8] {
         let imp = imp::Framebuffer::from_obj(self);
         let buf = imp.buffer.get().unwrap();
         let bw: usize = FramebufferExt::width(self) as _;
