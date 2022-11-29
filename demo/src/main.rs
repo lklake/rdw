@@ -108,14 +108,17 @@ fn rdp_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
         }))
     }));
 
-    rdp.connect_notify_local(Some("rdp-connected"), clone!(@weak app => move |rdp, _| {
-        let connected = rdp.property::<bool>("rdp-connected");
-        log::debug!("Connected: {connected:?}");
-        if !connected {
-            log::warn!("Last error: {:?}", rdp.last_error());
-            app.quit();
-        }
-    }));
+    rdp.connect_notify_local(
+        Some("rdp-connected"),
+        clone!(@weak app => move |rdp, _| {
+            let connected = rdp.property::<bool>("rdp-connected");
+            log::debug!("Connected: {connected:?}");
+            if !connected {
+                log::warn!("Last error: {:?}", rdp.last_error());
+                app.quit();
+            }
+        }),
+    );
 
     rdp.rdp_connect().unwrap();
 
