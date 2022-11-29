@@ -258,7 +258,7 @@ impl CliprdrHandler for RdpClipHandler {
 
 #[derive(Debug)]
 struct Inner {
-    tx: futures::channel::mpsc::Sender<RdpEvent>,
+    tx: futures::channel::mpsc::UnboundedSender<RdpEvent>,
 }
 
 #[derive(Clone, Debug)]
@@ -267,7 +267,7 @@ pub(crate) struct RdpContextHandler {
 }
 
 impl RdpContextHandler {
-    pub(crate) fn new(tx: futures::channel::mpsc::Sender<RdpEvent>) -> Self {
+    pub(crate) fn new(tx: futures::channel::mpsc::UnboundedSender<RdpEvent>) -> Self {
         Self {
             inner: Arc::new(Mutex::new(Inner { tx })),
         }

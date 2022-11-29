@@ -98,7 +98,7 @@ mod imp {
         thread: OnceCell<JoinHandle<Result<()>>>,
         tx: OnceCell<Sender<Event>>,
         notifier: Notifier,
-        rx: RefCell<Option<futures::channel::mpsc::Receiver<RdpEvent>>>,
+        rx: RefCell<Option<futures::channel::mpsc::UnboundedReceiver<RdpEvent>>>,
         last_mouse: Cell<(f64, f64)>,
         clipboard: Clipboard,
         keymap: Cell<Option<&'static [u16]>>,
@@ -107,7 +107,7 @@ mod imp {
 
     impl Default for Display {
         fn default() -> Self {
-            let (tx, rx) = futures::channel::mpsc::channel(10);
+            let (tx, rx) = futures::channel::mpsc::unbounded();
             let mut context = Context::new(RdpContextHandler::new(tx));
             context.settings.set_support_display_control(true);
             context
@@ -599,6 +599,10 @@ mod imp {
             }
 
             let mut ctxt = context.lock().unwrap();
+            // FIXME: we use unbounded channels to send RDP events, because we
+            // hold the context lock and it is contended with the Display/Gtk
+            // thread.. instead, we should have bounded channels but wait for
+            // free space.
             if !ctxt.check_event_handles() {
                 if let Some(e) = ctxt.last_error() {
                     eprintln!("{:?}", e);
