@@ -324,14 +324,8 @@ mod imp {
                         }),
                     );
                 }
-                RdpEvent::Connected => {
-                    self.connected.set(true);
-                    self.obj().notify("rdp-connected");
-                }
-                RdpEvent::Disconnected => {
-                    self.connected.set(false);
-                    self.obj().notify("rdp-connected");
-                }
+                RdpEvent::Connected => self.set_connected(true),
+                RdpEvent::Disconnected => self.set_connected(false),
                 RdpEvent::DesktopResize { w, h } => {
                     self.obj().set_display_size(Some((w as _, h as _)));
                 }
@@ -448,6 +442,12 @@ mod imp {
                         let _ = this.send_event(Event::ClipboardData(data)).await;
                     }));
                 }
+            }
+        }
+
+        fn set_connected(&self, connected: bool) {
+            if self.connected.replace(connected) != connected {
+                self.obj().notify("rdp-connected");
             }
         }
 
