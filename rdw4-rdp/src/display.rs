@@ -232,7 +232,8 @@ mod imp {
 
             self.obj().connect_resize_request(
                 clone!(@weak self as this => move |_, width, height, wmm, hmm| {
-                    log::debug!("resize-request: {:?}", (width, height, wmm, hmm));
+                    let scale_factor = this.obj().scale_factor() * 100;
+                    log::debug!("resize-request: {:?}", (width, height, wmm, hmm, scale_factor));
                     MainContext::default().spawn_local(glib::clone!(@weak this => async move {
                         let _ = this.send_event(Event::MonitorLayout(vec![MonitorLayout::new(
                             MonitorFlags::PRIMARY,
@@ -240,7 +241,8 @@ mod imp {
                             width, height,
                             wmm, hmm,
                             Orientation::Landscape,
-                            0, 0
+                            scale_factor as _,
+                            100,
                         )])).await;
                     }));
                 }),
