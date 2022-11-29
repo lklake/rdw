@@ -274,7 +274,6 @@ impl RdpContextHandler {
     }
 
     fn send(&mut self, event: RdpEvent) -> Result<()> {
-        // the lock should provide ordering guarantee, but we should remove it...
         let mut inner = self.inner.lock().unwrap();
         block_on(async move { inner.tx.send(event).await })
             .map_err(|e| RdpError::Failed(format!("{}", e)))?;
