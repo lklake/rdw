@@ -475,6 +475,7 @@ mod imp {
                         match err {
                             RdpErr::RdpErrConnect(RdpErrConnect::AuthenticationFailed)
                             | RdpErr::RdpErrConnect(RdpErrConnect::LogonFailure) => {
+                                // this should trigger RdpEvent::Authenticate on next connect()
                                 ctxt.settings.set_username(None).unwrap();
                                 ctxt.settings.set_password(None).unwrap();
                                 continue;
@@ -666,6 +667,11 @@ impl Display {
 
     pub fn rdp_connect(&mut self) -> Result<()> {
         self.imp().connect()
+    }
+
+    pub fn last_error(&self) -> Option<RdpErr> {
+        let ctxt = self.imp().context.lock().unwrap();
+        ctxt.last_error()
     }
 
     pub fn connect_rdp_authenticate<F: Fn(&Self) -> bool + 'static>(
