@@ -21,6 +21,14 @@ pub extern "C" fn rdw_rdp_display_connect(dpy: *mut RdwRdpDisplay) -> bool {
     this.rdp_connect().is_ok()
 }
 
+/// rdw_rdp_display_disconnect:
+/// @dpy: A #RdwDisplay
+#[no_mangle]
+pub extern "C" fn rdw_rdp_display_disconnect(dpy: *mut RdwRdpDisplay) {
+    let mut this: Display = unsafe { from_glib_none(dpy) };
+    this.rdp_disconnect()
+}
+
 /// rdw_rdp_display_get_settings:
 /// @dpy: A #RdwDisplay
 ///

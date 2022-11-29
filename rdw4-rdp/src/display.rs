@@ -53,6 +53,7 @@ mod imp {
 
     #[derive(Debug)]
     enum Event {
+        Disconnect,
         Keyboard(KbdFlags, u16),
         Mouse(PtrFlags, u16, u16),
         XMouse(PtrXFlags, u16, u16),
@@ -500,6 +501,12 @@ mod imp {
             Ok(())
         }
 
+        pub(crate) fn disconnect(&self) {
+            MainContext::default().spawn_local(glib::clone!(@weak self as this => async move {
+                let _ = this.send_event(Event::Disconnect).await;
+            }));
+        }
+
         async fn send_event(&self, event: Event) -> Result<()> {
             if let Some(tx) = self.tx.get() {
                 tx.send(event)
@@ -609,6 +616,9 @@ mod imp {
     ) -> Result<()> {
         let mut ctxt = context.lock().unwrap();
         match e {
+            Event::Disconnect => {
+                ctxt.instance.disconnect()?;
+            }
             Event::Keyboard(flags, code) => {
                 if let Some(mut input) = ctxt.input() {
                     input.send_keyboard_event(flags, code)?;
@@ -667,6 +677,10 @@ impl Display {
 
     pub fn rdp_connect(&mut self) -> Result<()> {
         self.imp().connect()
+    }
+
+    pub fn rdp_disconnect(&mut self) {
+        self.imp().disconnect()
     }
 
     pub fn last_error(&self) -> Option<RdpErr> {
