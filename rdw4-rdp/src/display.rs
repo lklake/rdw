@@ -48,7 +48,6 @@ mod imp {
             mpsc::{Receiver, Sender},
             Arc, Mutex,
         },
-        thread::JoinHandle,
     };
 
     #[derive(Debug)]
@@ -95,7 +94,6 @@ mod imp {
     pub struct Display {
         pub(crate) context: Arc<Mutex<Box<Context<RdpContextHandler>>>>,
         state: RefCell<Option<RdpEvent>>,
-        thread: OnceCell<JoinHandle<Result<()>>>,
         tx: OnceCell<Sender<Event>>,
         notifier: Notifier,
         rx: RefCell<Option<futures::channel::mpsc::UnboundedReceiver<RdpEvent>>>,
@@ -120,7 +118,6 @@ mod imp {
             Self {
                 context: Arc::new(Mutex::new(context)),
                 state: RefCell::new(None),
-                thread: OnceCell::new(),
                 tx: OnceCell::new(),
                 notifier: Notifier::new().unwrap(),
                 last_mouse: Cell::new((0.0, 0.0)),
@@ -454,22 +451,16 @@ mod imp {
         }
 
         pub(crate) fn connect(&self) -> Result<()> {
-            let mut rx = self
+            let mut rdp_event_rx = self
                 .rx
                 .take()
                 .ok_or_else(|| RdpError::Failed("already started".into()))?;
 
-            MainContext::default().spawn_local(clone!(@weak self as this => async move {
-                while let Some(e) = rx.next().await {
-                    this.dispatch_rdp_event(e);
-                }
-            }));
-
-            let notifier = self.notifier.clone();
-            let mut context = self.context.clone();
-            let (tx, rx) = mpsc::channel();
-            self.tx.set(tx).unwrap();
-            let thread = thread::spawn(move || {
+            fn freerdp_thread(
+                context: &mut Arc<Mutex<Box<Context<RdpContextHandler>>>>,
+                rx: Receiver<Event>,
+                notifier: Notifier,
+            ) -> Result<()> {
                 let mut ctxt = context.lock().unwrap();
                 loop {
                     let res = ctxt.instance.connect();
@@ -491,15 +482,32 @@ mod imp {
                 }
                 drop(ctxt);
 
-                let res = freerdp_main_loop(&mut context, rx, notifier);
+                let res = freerdp_main_loop(context, rx, notifier);
 
                 let mut ctxt = context.lock().unwrap();
                 let _ = ctxt.instance.disconnect();
                 log::debug!("freerdp thread end: {:?}", res);
                 res
+            }
+
+            let (tx, rx) = mpsc::channel();
+            self.tx.set(tx).unwrap();
+            let notifier = self.notifier.clone();
+            let mut context = self.context.clone();
+            let thread = thread::spawn(move || {
+                let res = freerdp_thread(&mut context, rx, notifier);
+                let mut ctxt = context.lock().unwrap();
+                ctxt.handler.close();
+                res
             });
 
-            self.thread.set(thread).unwrap();
+            MainContext::default().spawn_local(clone!(@weak self as this => async move {
+                while let Some(e) = rdp_event_rx.next().await {
+                    this.dispatch_rdp_event(e);
+                }
+                let _res = thread.join();
+            }));
+
             Ok(())
         }
 

@@ -273,6 +273,11 @@ impl RdpContextHandler {
         }
     }
 
+    pub(crate) fn close(&mut self) {
+        let inner = self.inner.lock().unwrap();
+        inner.tx.close_channel();
+    }
+
     fn send(&mut self, event: RdpEvent) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
         block_on(async move { inner.tx.send(event).await })
