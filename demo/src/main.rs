@@ -75,7 +75,7 @@ async fn show_password_dialog(
 }
 
 fn rdp_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
-    let mut rdp = rdw_rdp::Display::new();
+    let rdp = rdw_rdp::Display::new();
 
     let port = match uri.port() {
         -1 => 3389,
@@ -120,8 +120,12 @@ fn rdp_display(app: &gtk::Application, uri: glib::Uri) -> rdw::Display {
         }),
     );
 
-    rdp.rdp_connect().unwrap();
-
+    glib::MainContext::default().block_on(clone!(@weak rdp => async move {
+        if rdp.rdp_connect().await.is_err() {
+            log::warn!("Last error: {:?}", rdp.last_error());
+            app.quit();
+        }
+    }));
     rdp.upcast()
 }
 

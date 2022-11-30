@@ -450,17 +450,8 @@ mod imp {
             }
         }
 
-        pub(crate) fn connect(&self) -> Result<()> {
-            let mut rdp_event_rx = self
-                .rx
-                .take()
-                .ok_or_else(|| RdpError::Failed("already started".into()))?;
-
-            fn freerdp_thread(
-                context: &mut Arc<Mutex<Box<Context<RdpContextHandler>>>>,
-                rx: Receiver<Event>,
-                notifier: Notifier,
-            ) -> Result<()> {
+        pub(crate) async fn connect(&self) -> Result<()> {
+            fn do_connect(context: &mut Arc<Mutex<Box<Context<RdpContextHandler>>>>) -> Result<()> {
                 let mut ctxt = context.lock().unwrap();
                 loop {
                     let res = ctxt.instance.connect();
@@ -477,11 +468,15 @@ mod imp {
                             _ => {}
                         }
                     }
-                    res?;
-                    break;
+                    break res;
                 }
-                drop(ctxt);
+            }
 
+            fn do_loop(
+                context: &mut Arc<Mutex<Box<Context<RdpContextHandler>>>>,
+                rx: Receiver<Event>,
+                notifier: Notifier,
+            ) -> Result<()> {
                 let res = freerdp_main_loop(context, rx, notifier);
 
                 let mut ctxt = context.lock().unwrap();
@@ -490,12 +485,21 @@ mod imp {
                 res
             }
 
+            let mut rdp_event_rx = self
+                .rx
+                .take()
+                .ok_or_else(|| RdpError::Failed("already started".into()))?;
+
+            let (conn_tx, conn_rx) = futures::channel::oneshot::channel();
+
             let (tx, rx) = mpsc::channel();
             self.tx.set(tx).unwrap();
             let notifier = self.notifier.clone();
             let mut context = self.context.clone();
             let thread = thread::spawn(move || {
-                let res = freerdp_thread(&mut context, rx, notifier);
+                let res = do_connect(&mut context);
+                conn_tx.send(res).unwrap();
+                let res = do_loop(&mut context, rx, notifier);
                 let mut ctxt = context.lock().unwrap();
                 ctxt.handler.close();
                 res
@@ -505,10 +509,10 @@ mod imp {
                 while let Some(e) = rdp_event_rx.next().await {
                     this.dispatch_rdp_event(e);
                 }
-                let _res = thread.join();
+                let _ = thread.join().unwrap();
             }));
 
-            Ok(())
+            conn_rx.await.unwrap()
         }
 
         pub(crate) fn disconnect(&self) {
@@ -689,11 +693,11 @@ impl Display {
         self.imp().with_settings(f)
     }
 
-    pub fn rdp_connect(&mut self) -> Result<()> {
-        self.imp().connect()
+    pub async fn rdp_connect(&self) -> Result<()> {
+        self.imp().connect().await
     }
 
-    pub fn rdp_disconnect(&mut self) {
+    pub fn rdp_disconnect(&self) {
         self.imp().disconnect()
     }
 
