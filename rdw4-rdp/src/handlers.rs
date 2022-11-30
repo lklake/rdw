@@ -1,4 +1,4 @@
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc};
 
 use freerdp::{
     channels::{
@@ -256,31 +256,23 @@ impl CliprdrHandler for RdpClipHandler {
     }
 }
 
-#[derive(Debug)]
-struct Inner {
-    tx: futures::channel::mpsc::UnboundedSender<RdpEvent>,
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct RdpContextHandler {
-    inner: Arc<Mutex<Inner>>,
+    tx: futures::channel::mpsc::UnboundedSender<RdpEvent>,
 }
 
 impl RdpContextHandler {
     pub(crate) fn new(tx: futures::channel::mpsc::UnboundedSender<RdpEvent>) -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(Inner { tx })),
-        }
+        Self { tx }
     }
 
     pub(crate) fn close(&mut self) {
-        let inner = self.inner.lock().unwrap();
-        inner.tx.close_channel();
+        self.tx.close_channel();
     }
 
     fn send(&mut self, event: RdpEvent) -> Result<()> {
-        let mut inner = self.inner.lock().unwrap();
-        block_on(async move { inner.tx.send(event).await })
+        let mut tx = self.tx.clone();
+        block_on(async move { tx.send(event).await })
             .map_err(|e| RdpError::Failed(format!("{}", e)))?;
         Ok(())
     }
