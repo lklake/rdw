@@ -498,11 +498,13 @@ mod imp {
             let mut context = self.context.clone();
             let thread = thread::spawn(move || {
                 let res = do_connect(&mut context);
+                let connected = res.is_ok();
                 conn_tx.send(res).unwrap();
-                let res = do_loop(&mut context, rx, notifier);
-                let mut ctxt = context.lock().unwrap();
-                ctxt.handler.close();
-                res
+                if connected {
+                    let _res = do_loop(&mut context, rx, notifier);
+                    let mut ctxt = context.lock().unwrap();
+                    ctxt.handler.close();
+                }
             });
 
             MainContext::default().spawn_local(clone!(@weak self as this => async move {

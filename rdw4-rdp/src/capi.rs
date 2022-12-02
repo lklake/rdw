@@ -30,16 +30,17 @@ pub extern "C" fn rdw_rdp_display_get_type() -> glib::ffi::GType {
 pub unsafe extern "C" fn rdw_rdp_display_connect_async(
     dpy: *mut RdwRdpDisplay,
     _cancellable: *mut gio::ffi::GCancellable,
-    callback: *mut gio::ffi::GAsyncReadyCallback,
+    callback: gio::ffi::GAsyncReadyCallback,
     user_data: *mut c_void,
 ) {
     let this_ptr = dpy as *mut _;
     let this: Display = from_glib_none(dpy);
+    let callback = callback.unwrap();
 
     let closure = move |task: gio::LocalTask<bool>, _: Option<&Display>| {
         let result: *mut gio::ffi::GAsyncResult =
             task.upcast_ref::<gio::AsyncResult>().to_glib_none().0;
-        callback.as_ref().unwrap().unwrap()(this_ptr, result, user_data)
+        callback(this_ptr, result, user_data)
     };
 
     let task = gio::LocalTask::new(Some(&this), gio::Cancellable::NONE, closure);
