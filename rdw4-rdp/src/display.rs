@@ -38,9 +38,10 @@ mod imp {
         client::{CliprdrFormat, Context},
         input::{KbdFlags, PtrFlags, PtrXFlags, WHEEL_ROTATION_MASK},
     };
+    use futures::channel::{mpsc::UnboundedReceiver, oneshot};
     use glib::subclass::Signal;
     use gtk::subclass::prelude::*;
-    use once_cell::sync::{Lazy, OnceCell};
+    use once_cell::sync::Lazy;
     use rdw::gtk::{gdk, gio, glib::MainContext};
     use std::{
         cell::{Cell, RefCell},
@@ -52,7 +53,7 @@ mod imp {
 
     #[derive(Debug)]
     enum Event {
-        Disconnect,
+        Disconnect(oneshot::Sender<Result<()>>),
         Keyboard(KbdFlags, u16),
         Mouse(PtrFlags, u16, u16),
         XMouse(PtrXFlags, u16, u16),
@@ -94,13 +95,14 @@ mod imp {
     pub struct Display {
         pub(crate) context: Arc<Mutex<Box<Context<RdpContextHandler>>>>,
         state: RefCell<Option<RdpEvent>>,
-        tx: OnceCell<Sender<Event>>,
+        tx: RefCell<Option<Sender<Event>>>,
         notifier: Notifier,
-        rx: RefCell<Option<futures::channel::mpsc::UnboundedReceiver<RdpEvent>>>,
+        rx: RefCell<Option<UnboundedReceiver<RdpEvent>>>,
         last_mouse: Cell<(f64, f64)>,
         clipboard: Clipboard,
         keymap: Cell<Option<&'static [u16]>>,
         connected: Cell<bool>,
+        eodl_tx: RefCell<Option<oneshot::Sender<()>>>,
     }
 
     impl Default for Display {
@@ -118,13 +120,14 @@ mod imp {
             Self {
                 context: Arc::new(Mutex::new(context)),
                 state: RefCell::new(None),
-                tx: OnceCell::new(),
+                tx: Default::default(),
                 notifier: Notifier::new().unwrap(),
                 last_mouse: Cell::new((0.0, 0.0)),
                 rx: RefCell::new(Some(rx)),
                 clipboard: Default::default(),
                 keymap: Default::default(),
                 connected: Default::default(),
+                eodl_tx: Default::default(),
             }
         }
     }
@@ -479,8 +482,9 @@ mod imp {
             ) -> Result<()> {
                 let res = freerdp_main_loop(context, rx, notifier);
 
-                let mut ctxt = context.lock().unwrap();
-                let _ = ctxt.instance.disconnect();
+                // on unsollicted disconnect, is this necessary? comment out, as it sends Disconnect events twice..
+                // let mut ctxt = context.lock().unwrap();
+                // let _ = ctxt.instance.disconnect();
                 log::debug!("freerdp thread end: {:?}", res);
                 res
             }
@@ -490,10 +494,10 @@ mod imp {
                 .take()
                 .ok_or_else(|| RdpError::Failed("already started".into()))?;
 
-            let (conn_tx, conn_rx) = futures::channel::oneshot::channel();
+            let (conn_tx, conn_rx) = oneshot::channel();
 
             let (tx, rx) = mpsc::channel();
-            self.tx.set(tx).unwrap();
+            self.tx.replace(Some(tx));
             let notifier = self.notifier.clone();
             let mut context = self.context.clone();
             let thread = thread::spawn(move || {
@@ -502,34 +506,61 @@ mod imp {
                 conn_tx.send(res).unwrap();
                 if connected {
                     let _res = do_loop(&mut context, rx, notifier);
-                    let mut ctxt = context.lock().unwrap();
-                    ctxt.handler.close();
                 }
             });
 
+            // the "dispatch loop"
             MainContext::default().spawn_local(clone!(@weak self as this => async move {
                 while let Some(e) = rdp_event_rx.next().await {
+                    let disconnected = matches!(e, RdpEvent::Disconnected);
                     this.dispatch_rdp_event(e);
+                    if disconnected {
+                        break;
+                    }
                 }
                 let _ = thread.join().unwrap();
+                this.tx.replace(None);
+                this.rx.replace(Some(rdp_event_rx));
+                if let Some(eodl) = this.eodl_tx.take() {
+                    let _ = eodl.send(());
+                }
             }));
 
             conn_rx.await.unwrap()
         }
 
-        pub(crate) fn disconnect(&self) {
+        pub(crate) async fn disconnect(&self) -> Result<()> {
+            // since the dispatch loop is running in the same thread, this is not racy
+            // it must be running
+            if self.tx.borrow().is_none() {
+                return Ok(());
+            }
+            if self.eodl_tx.borrow().is_some() {
+                return Err(RdpError::Failed("Disconnect in progress".into()));
+            }
+
+            let (eodl_tx, eodl_rx) = oneshot::channel();
+            self.eodl_tx.replace(Some(eodl_tx));
+
+            let (tx, rx) = oneshot::channel();
             MainContext::default().spawn_local(glib::clone!(@weak self as this => async move {
-                let _ = this.send_event(Event::Disconnect).await;
+                let _ = this.send_event(Event::Disconnect(tx)).await;
             }));
+
+            let res = rx.await.unwrap_or(Ok(()));
+            let _ = eodl_rx.await;
+            self.eodl_tx.replace(None);
+            res
         }
 
         async fn send_event(&self, event: Event) -> Result<()> {
-            if let Some(tx) = self.tx.get() {
-                tx.send(event)
-                    .map_err(|_| RdpError::Failed("send() failed!".into()))?;
-                self.notifier.notify().await
-            } else {
-                Err(RdpError::Failed("No event channel!".into()))
+            match &*self.tx.borrow() {
+                Some(tx) => {
+                    tx.send(event)
+                        .map_err(|_| RdpError::Failed("send() failed!".into()))?;
+                    self.notifier.notify().await
+                }
+                None => Err(RdpError::Failed("No event channel!".into())),
             }
         }
 
@@ -636,8 +667,9 @@ mod imp {
     ) -> Result<()> {
         let mut ctxt = context.lock().unwrap();
         match e {
-            Event::Disconnect => {
-                ctxt.instance.disconnect()?;
+            Event::Disconnect(tx) => {
+                let res = ctxt.instance.disconnect();
+                let _ = tx.send(res);
             }
             Event::Keyboard(flags, code) => {
                 if let Some(mut input) = ctxt.input() {
@@ -699,8 +731,8 @@ impl Display {
         self.imp().connect().await
     }
 
-    pub fn rdp_disconnect(&self) {
-        self.imp().disconnect()
+    pub async fn rdp_disconnect(&self) -> Result<()> {
+        self.imp().disconnect().await
     }
 
     pub fn last_error(&self) -> Option<RdpErr> {

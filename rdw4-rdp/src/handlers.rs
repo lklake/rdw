@@ -266,10 +266,6 @@ impl RdpContextHandler {
         Self { tx }
     }
 
-    pub(crate) fn close(&mut self) {
-        self.tx.close_channel();
-    }
-
     fn send(&mut self, event: RdpEvent) -> Result<()> {
         let mut tx = self.tx.clone();
         block_on(async move { tx.send(event).await })
