@@ -78,7 +78,7 @@ impl freerdp::graphics::PointerHandler for RdpPointerHandler {
         pointer: &Pointer,
     ) -> Result<()> {
         let gdi = context.gdi().ok_or(RdpError::Unsupported)?;
-        let data = pointer.bgra_data(gdi.palette())?;
+        let data = pointer.data(gdi.palette(), freerdp::PIXEL_FORMAT_RGBA32)?;
         let width = pointer.width() as _;
         let height = pointer.height() as _;
         let x = pointer.x() as _;
