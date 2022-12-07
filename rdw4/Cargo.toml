@@ -38,8 +38,8 @@ wayland-protocols = { version = "0.30.0-beta.10", features = ["unstable", "clien
 x11 = "2.18.2"
 
 [target.'cfg(windows)'.dependencies]
-gdk-win32 = { package = "gdk4-win32", features = ["win32"], version = "0.5" }
-windows = { version = "0.41.0", features = [
+gdk-win32 = { package = "gdk4-win32", features = ["win32"], version = "0.5.3" }
+windows = { version = "0.43.0", features = [
   "Win32_Devices_HumanInterfaceDevice",
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
