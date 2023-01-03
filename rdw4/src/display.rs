@@ -55,6 +55,7 @@ pub mod imp {
     use once_cell::sync::{Lazy, OnceCell};
     use std::{
         cell::{Cell, RefCell},
+        collections::HashSet,
         time::Duration,
     };
     #[cfg(windows)]
@@ -86,8 +87,9 @@ pub mod imp {
         pub(crate) cursor_position: Cell<Option<(usize, usize)>>,
         // press-and-release detection time in ms
         pub(crate) synthesize_delay: Cell<u32>,
-        pub(crate) last_key_press: Cell<Option<(u32, u32)>>,
+        pub(crate) last_key_press: Cell<Option<(gdk::Key, u32)>>,
         pub(crate) last_key_press_timeout: Cell<Option<SourceId>>,
+        pub(crate) keys_pressed: RefCell<HashSet<(gdk::Key, u32)>>,
 
         // the shortcut to ungrab key/mouse (to be configurable and extended with ctrl-alt)
         pub(crate) grab_shortcut: OnceCell<gtk::ShortcutTrigger>,
@@ -799,10 +801,21 @@ pub mod imp {
             }
         }
 
+        fn key_press(&self, keyval: gdk::Key, keycode: u32) {
+            self.keys_pressed.borrow_mut().insert((keyval, keycode));
+            self.obj()
+                .emit_by_name::<()>("key-event", &[&keyval, &keycode, &KeyEvent::PRESS]);
+        }
+
+        fn key_release(&self, keyval: gdk::Key, keycode: u32) {
+            self.keys_pressed.borrow_mut().remove(&(keyval, keycode));
+            self.obj()
+                .emit_by_name::<()>("key-event", &[&keyval, &keycode, &KeyEvent::RELEASE])
+        }
+
         fn emit_last_key_press(&self) {
             if let Some((keyval, keycode)) = self.last_key_press.take() {
-                self.obj()
-                    .emit_by_name::<()>("key-event", &[&keyval, &keycode, &KeyEvent::PRESS]);
+                self.key_press(keyval, keycode);
             }
 
             if let Some(timeout_id) = self.last_key_press_timeout.take() {
@@ -827,7 +840,7 @@ pub mod imp {
             self.emit_last_key_press();
 
             // synthesize press-and-release if within the synthesize-delay boundary, else emit
-            self.last_key_press.set(Some((keyval.into_glib(), keycode)));
+            self.last_key_press.set(Some((keyval, keycode)));
             self.last_key_press_timeout
                 .set(Some(glib::timeout_add_local(
                     Duration::from_millis(self.synthesize_delay.get() as _),
@@ -840,7 +853,7 @@ pub mod imp {
 
         fn key_released(&self, keyval: gdk::Key, keycode: u32) {
             if let Some((last_keyval, last_keycode)) = self.last_key_press.get() {
-                if (last_keyval, last_keycode) == (keyval.into_glib(), keycode) {
+                if (last_keyval, last_keycode) == (keyval, keycode) {
                     self.last_key_press.set(None);
                     if let Some(timeout_id) = self.last_key_press_timeout.take() {
                         timeout_id.remove();
@@ -861,10 +874,7 @@ pub mod imp {
             // flush pending key event
             self.emit_last_key_press();
 
-            self.obj().emit_by_name::<()>(
-                "key-event",
-                &[&keyval.into_glib(), &keycode, &KeyEvent::RELEASE],
-            )
+            self.key_release(keyval, keycode);
         }
 
         fn try_grab_keyboard(&self) -> bool {
