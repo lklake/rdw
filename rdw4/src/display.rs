@@ -333,6 +333,12 @@ pub mod imp {
             self.obj().set_focusable(true);
             self.obj().set_focus_on_click(true);
 
+            let ec = gtk::EventControllerFocus::new();
+            self.obj().add_controller(&ec);
+            ec.connect_leave(clone!(@weak self as this => @default-panic, move |_ec| {
+                this.release_keys();
+            }));
+
             if self.realize_egl() {
                 if let Err(e) = unsafe { self.realize_gl() } {
                     log::warn!("Failed to realize GL: {}", e);
@@ -813,14 +819,28 @@ pub mod imp {
                 .emit_by_name::<()>("key-event", &[&keyval, &keycode, &KeyEvent::RELEASE])
         }
 
+        fn clear_last_key_press(&self) {
+            self.last_key_press.set(None);
+            if let Some(timeout_id) = self.last_key_press_timeout.take() {
+                timeout_id.remove();
+            }
+        }
+
+        fn release_keys(&self) {
+            self.clear_last_key_press();
+            for key in self.keys_pressed.take() {
+                dbg!(key);
+                self.key_release(key.0, key.1);
+            }
+            self.keys_pressed.borrow_mut().clear();
+        }
+
         fn emit_last_key_press(&self) {
             if let Some((keyval, keycode)) = self.last_key_press.take() {
                 self.key_press(keyval, keycode);
             }
 
-            if let Some(timeout_id) = self.last_key_press_timeout.take() {
-                timeout_id.remove();
-            }
+            self.clear_last_key_press();
         }
 
         fn key_pressed(&self, ec: &gtk::EventControllerKey, keyval: gdk::Key, keycode: u32) {
@@ -854,10 +874,7 @@ pub mod imp {
         fn key_released(&self, keyval: gdk::Key, keycode: u32) {
             if let Some((last_keyval, last_keycode)) = self.last_key_press.get() {
                 if (last_keyval, last_keycode) == (keyval, keycode) {
-                    self.last_key_press.set(None);
-                    if let Some(timeout_id) = self.last_key_press_timeout.take() {
-                        timeout_id.remove();
-                    }
+                    self.clear_last_key_press();
 
                     self.obj().emit_by_name::<()>(
                         "key-event",
