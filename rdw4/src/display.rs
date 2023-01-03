@@ -760,6 +760,7 @@ pub mod imp {
             gl::GenTextures(1, &mut tex_id);
             self.texture_id.set(tex_id);
 
+            self.obj().set_display_size(self.display_size.take());
             Ok(())
         }
 
@@ -1462,6 +1463,12 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
                 return;
             }
 
+            imp.display_size.replace(size);
+
+            if !self.is_realized() {
+                return;
+            }
+
             let _ctx = imp.make_current();
             if let Some((width, height)) = size {
                 unsafe {
@@ -1480,7 +1487,6 @@ impl<O: IsA<Display> + IsA<gtk::Widget> + IsA<gtk::Accessible>> DisplayExt for O
                 }
             }
 
-            imp.display_size.replace(size);
             self.queue_resize();
         }
     }
