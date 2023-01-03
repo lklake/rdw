@@ -418,6 +418,10 @@ pub mod imp {
                     this.obj().emit_by_name::<()>("mouse-release", &[&button]);
                 }),
             );
+            ec.connect_cancel(clone!(@weak self as this => move |gesture, _| {
+                let button = gesture.current_button();
+                this.obj().emit_by_name::<()>("mouse-release", &[&button]);
+            }));
 
             let ec = gtk::EventControllerScroll::new(
                 gtk::EventControllerScrollFlags::BOTH_AXES
@@ -829,7 +833,6 @@ pub mod imp {
         fn release_keys(&self) {
             self.clear_last_key_press();
             for key in self.keys_pressed.take() {
-                dbg!(key);
                 self.key_release(key.0, key.1);
             }
             self.keys_pressed.borrow_mut().clear();
