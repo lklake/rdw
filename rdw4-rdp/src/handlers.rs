@@ -307,7 +307,9 @@ impl freerdp::client::Handler for RdpContextHandler {
             settings: context.settings.clone(),
         })?;
         let settings = rx.recv().unwrap()?;
-        context.settings.clone_from(&settings);
+        context.settings.set_username(settings.username().as_deref())?;
+        context.settings.set_password(settings.password().as_deref())?;
+        context.settings.set_domain(settings.domain().as_deref())?;
         Ok(())
     }
 
