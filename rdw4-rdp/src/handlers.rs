@@ -39,6 +39,7 @@ pub(crate) enum RdpEvent {
     },
     Connected,
     Disconnected,
+    Eol,
     DesktopResize {
         w: u32,
         h: u32,
@@ -271,6 +272,10 @@ impl RdpContextHandler {
         block_on(async move { tx.send(event).await })
             .map_err(|e| RdpError::Failed(format!("{}", e)))?;
         Ok(())
+    }
+
+    pub(crate) fn send_eol(&mut self) -> Result<()> {
+        self.send(RdpEvent::Eol)
     }
 
     fn send_update_buffer(&mut self, x: u32, y: u32, w: u32, h: u32) -> Result<()> {

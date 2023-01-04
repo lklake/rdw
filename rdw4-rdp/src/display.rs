@@ -444,6 +444,7 @@ mod imp {
                         let _ = this.send_event(Event::ClipboardData(data)).await;
                     }));
                 }
+                RdpEvent::Eol => {}
             }
         }
 
@@ -482,10 +483,9 @@ mod imp {
             ) -> Result<()> {
                 let res = freerdp_main_loop(context, rx, notifier);
 
-                // on unsollicted disconnect, is this necessary? comment out, as it sends Disconnect events twice..
-                // let mut ctxt = context.lock().unwrap();
-                // let _ = ctxt.instance.disconnect();
                 log::debug!("freerdp thread end: {:?}", res);
+                let mut ctxt = context.lock().unwrap();
+                ctxt.handler.send_eol().unwrap();
                 res
             }
 
@@ -512,9 +512,9 @@ mod imp {
             // the "dispatch loop"
             MainContext::default().spawn_local(clone!(@weak self as this => async move {
                 while let Some(e) = rdp_event_rx.next().await {
-                    let disconnected = matches!(e, RdpEvent::Disconnected);
+                    let eol = matches!(e, RdpEvent::Eol);
                     this.dispatch_rdp_event(e);
-                    if disconnected {
+                    if eol {
                         break;
                     }
                 }
