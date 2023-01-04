@@ -852,11 +852,11 @@ pub mod imp {
                 if self.grab_shortcut.get().unwrap().trigger(e, false) == gdk::KeyMatch::Exact {
                     if self.grabbed.get().is_empty() {
                         self.try_grab();
+                        return;
                     } else {
                         self.ungrab_keyboard();
                         self.ungrab_mouse();
                     }
-                    return;
                 }
             }
 
