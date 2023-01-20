@@ -1,15 +1,9 @@
 [workspace]
 members = [
-    "demo",
-    "keycodemap",
     "rdw4",
-    "rdw4-rdp",
-    "rdw4-spice",
-    "rdw4-vnc",
-    "xtask",
 ]
 exclude = [
     "cbindgen",
 ]
 
-default-members = ["demo"]
+default-members = ["rdw4"]

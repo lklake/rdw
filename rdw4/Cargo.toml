@@ -11,7 +11,7 @@ capi = []
 
 [build-dependencies]
 cargo_metadata = "0.14"
-cbindgen = { path = "../cbindgen", features = ["gobject"] }
+
 
 [dependencies]
 log = "0.4"

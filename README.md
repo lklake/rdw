@@ -1,6 +1,7 @@
 # Description
 forked from https://gitlab.gnome.org/malureau/rdw
 
+Remove the broken dependency on cbindgen so that it can be used to provide rdw4 dependencies for the qemu-display project.
 
 # RDW: Gtk4 remote desktop widgets
 
