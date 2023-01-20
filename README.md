@@ -1,3 +1,7 @@
+# Description
+forked from https://gitlab.gnome.org/malureau/rdw
+
+
 # RDW: Gtk4 remote desktop widgets
 
 The project goal is to provide Gtk4 widgets for remote desktops: VNC, RDP,
